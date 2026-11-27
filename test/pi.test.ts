@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll } from "vitest";
 import { mkdtempSync, writeFileSync, chmodSync, realpathSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { tmpdir, homedir } from "node:os";
 import { join } from "node:path";
 import { runPi } from "../src/pi.ts";
 
@@ -49,9 +49,23 @@ exit \${FAKE_EXIT:-0}
     }
   });
 
-  it("rejects when pi cannot be started", async () => {
+  it("expands a leading ~ to the home directory", async () => {
+    const home = realpathSync(homedir());
+
+    const result = await runPi({ bin: fakePi, prompt: "x", directory: "~" });
+
+    expect(result.output).toContain(`cwd: ${home}`);
+  });
+
+  it("rejects with a clear message when the directory does not exist", async () => {
     await expect(
       runPi({ bin: fakePi, prompt: "x", directory: "/does/not/exist" }),
-    ).rejects.toThrow();
+    ).rejects.toThrow("Working directory does not exist: /does/not/exist");
+  });
+
+  it("rejects when pi cannot be started", async () => {
+    await expect(
+      runPi({ bin: "/no/such/pi", prompt: "x", directory: workDir }),
+    ).rejects.toThrow("ENOENT");
   });
 });
