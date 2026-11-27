@@ -85,6 +85,19 @@ exit \${FAKE_EXIT:-0}
     }
   });
 
+  it("force-kills a command that ignores the stop request", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "stubborn-"));
+    const stubborn = join(dir, "agent");
+    writeFileSync(stubborn, "#!/bin/sh\ntrap '' TERM\nsleep 5\n");
+    chmodSync(stubborn, 0o755);
+
+    const started = Date.now();
+    const result = await run({ bin: stubborn, timeoutMs: 100, killGraceMs: 100 });
+
+    expect(result.exitCode).toBeNull();
+    expect(Date.now() - started).toBeLessThan(2000);
+  });
+
   it("can kill every running command, e.g. when the server shuts down", async () => {
     process.env.FAKE_SLEEP = "5";
     try {

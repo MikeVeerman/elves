@@ -289,3 +289,17 @@ describe("OpencodeLog", () => {
     );
   });
 });
+
+describe("unexpected event shapes", () => {
+  it.each([
+    ["opencode text without a part", new OpencodeLog(), { type: "text" }],
+    ["opencode tool_use without a part", new OpencodeLog(), { type: "tool_use" }],
+    ["codex file_change without changes", new CodexLog(), { type: "item.completed", item: { type: "file_change" } }],
+    ["claude assistant message with non-list content", new ClaudeLog(), { type: "assistant", message: { content: "hi" } }],
+    ["pi tool result with non-list content", new PiLog(), { type: "tool_execution_end", result: { content: 5 } }],
+  ])("shows the raw line instead of throwing: %s", (_, log, event) => {
+    const raw = JSON.stringify(event) + "\n";
+
+    expect(log.push(raw)).toBe(raw);
+  });
+});

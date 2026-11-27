@@ -104,6 +104,21 @@ describe("Store", () => {
       expect(store.listRuns(factoryId).map((r) => r.id)).toEqual([second, first]);
     });
 
+    it("lists at most the latest 50 runs by default", () => {
+      const ids = Array.from({ length: 60 }, () => store.startRun(factoryId));
+
+      const runs = store.listRuns(factoryId);
+
+      expect(runs).toHaveLength(50);
+      expect(runs[0].id).toBe(ids[59]);
+    });
+
+    it("counts all runs of a factory", () => {
+      for (let i = 0; i < 60; i++) store.startRun(factoryId);
+
+      expect(store.countRuns(factoryId)).toBe(60);
+    });
+
     it("marks runs left 'running' as 'interrupted'", () => {
       const runId = store.startRun(factoryId);
 
