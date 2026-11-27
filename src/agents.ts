@@ -10,6 +10,7 @@ export type AgentRequest = {
   prompt: string;
   directory: string;
   timeoutMs: number;
+  signal?: AbortSignal;
   onOutput?: (text: string) => void;
 };
 export type RunAgent = (request: AgentRequest) => Promise<RunResult>;

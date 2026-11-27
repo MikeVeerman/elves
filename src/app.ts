@@ -115,9 +115,7 @@ export function createApp({ store, supervisor, live, models, auth }: Deps) {
               <h1>${factory.name}</h1>
               <div class="status-line">
                 ${statusPill(status)}
-                <form method="post" action="/factories/${factory.id}/${running ? "stop" : "start"}">
-                  <button>${running ? "Stop" : "Start"}</button>
-                </form>
+                ${controlButton(factory.id, status)}
               </div>
             </div>
           </div>
@@ -161,6 +159,12 @@ export function createApp({ store, supervisor, live, models, auth }: Deps) {
   app.post("/factories/:id/stop", (c) => {
     const id = idParam(c);
     supervisor.stop(id);
+    return c.redirect(`/factories/${id}`, 303);
+  });
+
+  app.post("/factories/:id/force-stop", (c) => {
+    const id = idParam(c);
+    supervisor.forceStop(id);
     return c.redirect(`/factories/${id}`, 303);
   });
 
@@ -219,6 +223,22 @@ export function createApp({ store, supervisor, live, models, auth }: Deps) {
 
 function sameFolder(a: string, b: string): boolean {
   return resolve(expandHome(a)) === resolve(expandHome(b));
+}
+
+/**
+ * Start when stopped, Stop while working or napping. Stop lets the current run finish, so while
+ * that happens ("stopping") the button turns into Force stop, which kills the agent right away.
+ */
+function controlButton(id: number, status: Status): Html {
+  const [action, label, style] =
+    status.state === "stopped"
+      ? ["start", "Start", ""]
+      : status.state === "stopping"
+        ? ["force-stop", "Force stop", "danger"]
+        : ["stop", "Stop", ""];
+  return html`<form method="post" action="/factories/${id}/${action}">
+    <button class="${style}">${label}</button>
+  </form>`;
 }
 
 function statusPill(status: Status): Html {

@@ -103,7 +103,9 @@ Tailscale encrypts the traffic between your devices).
 
 ## Good to know
 
-- **Stopping an elf** lets its current run finish first. Stopping a napping elf takes effect at once.
+- **Stopping an elf** lets its current run finish first; meanwhile it shows as "stopping" with a
+  **Force stop** button that kills the agent right away (the run is marked `interrupted`).
+  Stopping a napping elf takes effect at once.
 - **Firing (deleting) an elf** is only possible once it's stopped.
 - **The max run time** first asks the agent to stop; if it's still running 5 seconds later, it's killed.
 - **A run that ends without a final message** counts as failed, so the elf naps instead of retrying

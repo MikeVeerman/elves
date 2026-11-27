@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import { Store } from "../src/store.ts";
 import { Supervisor } from "../src/supervisor.ts";
 import { createApp } from "../src/app.ts";
@@ -45,11 +45,14 @@ describe("web app", () => {
   beforeEach(async () => {
     store = new Store(":memory:");
     live = new LiveRuns();
-    // The agent never finishes, so a started factory stays "working".
+    // The agent only finishes when force-stopped, so a started factory stays "working".
     supervisor = new Supervisor({
       store,
       live,
-      runAgent: () => new Promise(() => {}),
+      runAgent: ({ signal }) =>
+        new Promise((resolve) =>
+          signal?.addEventListener("abort", () => resolve({ exitCode: null, output: "", finalText: "" })),
+        ),
       sleep: () => new Promise(() => {}),
     });
     app = createApp({ store, supervisor, live, models, auth: AUTH });
@@ -319,6 +322,29 @@ describe("web app", () => {
 
       expect(html).not.toContain("Fire this elf");
       expect(html).toContain("Stop this elf first");
+    });
+
+    it("offers Stop while working, and Force stop while stopping", async () => {
+      supervisor.start(id);
+      const working = await (await req(`/factories/${id}`)).text();
+      expect(working).toContain(`action="/factories/${id}/stop"`);
+      expect(working).not.toContain("Force stop");
+
+      supervisor.stop(id);
+      const stopping = await (await req(`/factories/${id}`)).text();
+      expect(stopping).toContain(`action="/factories/${id}/force-stop"`);
+      expect(stopping).toContain("Force stop");
+    });
+
+    it("force stops the factory", async () => {
+      supervisor.start(id);
+      supervisor.stop(id);
+
+      const res = await req(`/factories/${id}/force-stop`, { method: "POST" });
+
+      expect(res.status).toBe(303);
+      await vi.waitFor(() => expect(supervisor.status(id).state).toBe("stopped"));
+      expect(store.listRuns(id)[0].status).toBe("interrupted");
     });
 
     it("deletes the factory", async () => {
