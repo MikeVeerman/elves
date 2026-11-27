@@ -12,8 +12,11 @@ If there is no task to pick up, do nothing and end your reply with exactly ${NO_
 }
 
 export function classify(result: Pick<AgentResult, "exitCode" | "finalText">): RunResult["status"] {
-  if (result.exitCode !== 0) return "failed";
-  return result.finalText.trimEnd().endsWith(NO_TASK_MARKER) ? "idle" : "done";
+  const finalText = result.finalText.trim();
+  // No final message means something went wrong, even with exit code 0. Counting that as
+  // "done" would make the elf run again straight away, over and over.
+  if (result.exitCode !== 0 || !finalText) return "failed";
+  return finalText.endsWith(NO_TASK_MARKER) ? "idle" : "done";
 }
 
 export type Status =

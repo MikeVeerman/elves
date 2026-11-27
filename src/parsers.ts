@@ -27,13 +27,13 @@ export abstract class EventLog {
   }
 
   private renderLine(line: string): string {
-    let event;
+    // Not JSON, or JSON in a shape we don't know: show the line as it is. Never throw here:
+    // this runs inside the output stream handler, and a throw would take down the server.
     try {
-      event = JSON.parse(line);
+      return this.render(JSON.parse(line));
     } catch {
       return line;
     }
-    return this.render(event);
   }
 
   protected abstract render(event: Event): string;

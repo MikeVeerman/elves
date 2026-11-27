@@ -8,6 +8,8 @@ import type { LiveRuns } from "./live.ts";
 import type { ModelLists } from "./models.ts";
 import { AGENTS, type AgentName } from "./agents.ts";
 import { elf, moodFor } from "./elves.ts";
+import { expandHome } from "./runner.ts";
+import { resolve } from "node:path";
 
 type Html = HtmlEscapedString | Promise<HtmlEscapedString>;
 
@@ -23,8 +25,10 @@ const NEW_FACTORY: FactoryInput = {
   maxRunMinutes: 60,
 };
 
-const INVALID_FORM =
-  "Please fill in a name, prompt and directory, pick an agent, and use whole minutes of at least 1.";
+// Node timers can't wait longer than ~24.8 days; longer values fire right away. One week is plenty.
+const MAX_MINUTES = 7 * 24 * 60;
+
+const INVALID_FORM = `Please fill in a name, prompt and directory, pick an agent, and use whole minutes from 1 to ${MAX_MINUTES}.`;
 
 export function createApp({ store, supervisor, live, models }: Deps) {
   const app = new Hono();
@@ -89,6 +93,11 @@ export function createApp({ store, supervisor, live, models }: Deps) {
     if (!factory) return c.notFound();
     const status = supervisor.status(factory.id);
     const running = status.state !== "stopped";
+    const runs = store.listRuns(factory.id);
+    const runCount = store.countRuns(factory.id);
+    const neighbours = store
+      .listFactories()
+      .filter((f) => f.id !== factory.id && sameFolder(f.directory, factory.directory));
 
     return c.html(
       page(
@@ -107,14 +116,24 @@ export function createApp({ store, supervisor, live, models }: Deps) {
               </div>
             </div>
           </div>
+          ${neighbours.length > 0
+            ? html`<p class="warning">
+                ⚠ ${neighbours.map((f, i) => html`${i > 0 ? ", " : ""}<a href="/factories/${f.id}">${f.name}</a>`)}
+                also works in this folder. Two agents working in one folder at the same time can get in
+                each other's way.
+              </p>`
+            : ""}
           <h2>Runs</h2>
-          ${runsTable(store.listRuns(factory.id))}
+          ${runsTable(runs)}
+          ${runCount > runs.length ? html`<p class="note">Showing the latest ${runs.length} of ${runCount} runs.</p>` : ""}
           <h2>Settings</h2>
           ${factoryForm(`/factories/${factory.id}`, factory, "Save", models)}
           <h2>Danger zone</h2>
-          <form method="post" action="/factories/${factory.id}/delete">
-            <button class="danger">Fire this elf (deletes its runs too)</button>
-          </form>
+          ${running
+            ? html`<p>Stop this elf first. You can fire it once its current run has finished.</p>`
+            : html`<form method="post" action="/factories/${factory.id}/delete">
+                <button class="danger">Fire this elf (deletes its runs too)</button>
+              </form>`}
         `,
       ),
     );
@@ -142,7 +161,10 @@ export function createApp({ store, supervisor, live, models }: Deps) {
 
   app.post("/factories/:id/delete", (c) => {
     const id = Number(c.req.param("id"));
-    supervisor.stop(id);
+    // A working elf's agent would keep running, and its run would be deleted from under it.
+    if (supervisor.status(id).state !== "stopped") {
+      return c.text("Stop this elf and wait for its current run to finish before firing it.", 409);
+    }
     store.deleteFactory(id);
     return c.redirect("/", 303);
   });
@@ -209,9 +231,12 @@ async function readFactoryForm(request: Request): Promise<FactoryInput | undefin
     input.prompt &&
     input.directory &&
     AGENTS.includes(input.agent) &&
-    input.idleMinutes >= 1 &&
-    input.maxRunMinutes >= 1;
+    [input.idleMinutes, input.maxRunMinutes].every((m) => m >= 1 && m <= MAX_MINUTES);
   return valid ? input : undefined;
+}
+
+function sameFolder(a: string, b: string): boolean {
+  return resolve(expandHome(a)) === resolve(expandHome(b));
 }
 
 function statusPill(status: Status): Html {
@@ -239,10 +264,10 @@ function factoryForm(action: string, factory: FactoryInput, button: string, mode
       <label>Working directory <input name="directory" value="${factory.directory}" required></label>
       <div class="row">
         <label>Wait when there's nothing to do (minutes)
-          <input type="number" min="1" step="1" name="idleMinutes" value="${factory.idleMinutes}" required>
+          <input type="number" min="1" max="${MAX_MINUTES}" step="1" name="idleMinutes" value="${factory.idleMinutes}" required>
         </label>
         <label>Max run time (minutes)
-          <input type="number" min="1" step="1" name="maxRunMinutes" value="${factory.maxRunMinutes}" required>
+          <input type="number" min="1" max="${MAX_MINUTES}" step="1" name="maxRunMinutes" value="${factory.maxRunMinutes}" required>
         </label>
       </div>
       <label>Prompt <textarea name="prompt" rows="8" required>${factory.prompt}</textarea></label>
@@ -369,6 +394,8 @@ const STYLE = `
   .title-row h1 { margin: 0; }
   .hero { display: flex; align-items: center; gap: 1.25rem; margin: .5rem 0 1rem; }
   .status-line { display: flex; align-items: center; gap: .75rem; }
+  .warning { background: #fff3cd; border: 2px solid var(--gold); padding: .6rem .8rem; }
+  .note { color: var(--muted); font-size: .9rem; }
   .empty { text-align: center; padding: 2.5rem 1rem; border: 2px dashed var(--line); background: var(--card); }
 
   table { border-collapse: collapse; width: 100%; background: var(--card); border: 2px solid var(--ink);

@@ -53,6 +53,7 @@ const SCHEMA = `
     started_at TEXT NOT NULL,
     finished_at TEXT
   );
+  CREATE INDEX IF NOT EXISTS runs_by_factory ON runs (factory_id, id);
 `;
 
 // Settings added after the first version. Added to existing databases on startup.
@@ -136,10 +137,15 @@ export class Store {
     return this.db.prepare(`SELECT ${RUN_COLUMNS} FROM runs WHERE id = ?`).get(id) as Run | undefined;
   }
 
-  listRuns(factoryId: number): Run[] {
+  /** The newest runs first. An idle elf adds a run every wait period, so the list is capped. */
+  listRuns(factoryId: number, limit = 50): Run[] {
     return this.db
-      .prepare(`SELECT ${RUN_COLUMNS} FROM runs WHERE factory_id = ? ORDER BY id DESC`)
-      .all(factoryId) as Run[];
+      .prepare(`SELECT ${RUN_COLUMNS} FROM runs WHERE factory_id = ? ORDER BY id DESC LIMIT ?`)
+      .all(factoryId, limit) as Run[];
+  }
+
+  countRuns(factoryId: number): number {
+    return this.db.prepare("SELECT COUNT(*) AS n FROM runs WHERE factory_id = ?").get(factoryId)!.n as number;
   }
 
   markUnfinishedRunsInterrupted(): void {

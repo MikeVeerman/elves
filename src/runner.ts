@@ -9,6 +9,8 @@ export type CommandRequest = {
   directory: string;
   log: EventLog;
   timeoutMs: number;
+  /** After the stop request at timeout, how long to wait before force-killing. */
+  killGraceMs?: number;
   onOutput?: (text: string) => void;
 };
 export type RunResult = { exitCode: number | null; output: string; finalText: string };
@@ -21,22 +23,34 @@ export function killAllRuns(): void {
   for (const pid of running) killGroup(pid);
 }
 
-function killGroup(pid: number): void {
+function killGroup(pid: number, signal: NodeJS.Signals = "SIGTERM"): void {
   try {
-    process.kill(-pid, "SIGTERM");
+    process.kill(-pid, signal);
   } catch {
     // Already gone.
   }
+}
+
+/** "~" means the home directory. No shell is involved, so we expand it ourselves. */
+export function expandHome(directory: string): string {
+  return directory.replace(/^~(?=$|\/)/, homedir());
 }
 
 /**
  * Runs an agent command in the given directory. Returns a readable log (also streamed
  * through onOutput) and the agent's final message. Kills the command after timeoutMs.
  */
-export const runCommand = ({ bin, args, directory, log, timeoutMs, onOutput }: CommandRequest): Promise<RunResult> =>
+export const runCommand = ({
+  bin,
+  args,
+  directory,
+  log,
+  timeoutMs,
+  killGraceMs = 5000,
+  onOutput,
+}: CommandRequest): Promise<RunResult> =>
   new Promise((resolve, reject) => {
-    // No shell is involved, so expand "~" ourselves.
-    const cwd = directory.replace(/^~(?=$|\/)/, homedir());
+    const cwd = expandHome(directory);
     // Node reports a missing cwd as "spawn <bin> ENOENT", which looks like the agent is missing. Say what's wrong.
     if (!existsSync(cwd)) return reject(new Error(`Working directory does not exist: ${cwd}`));
 
@@ -51,9 +65,12 @@ export const runCommand = ({ bin, args, directory, log, timeoutMs, onOutput }: C
 
     const pid = child.pid;
     if (pid) running.add(pid);
+    let forceKill: NodeJS.Timeout | undefined;
     const timer = setTimeout(() => {
       emit("\n[killed: the run took longer than the max run time]\n");
       killGroup(pid!);
+      // An agent may ignore the stop request. Then it doesn't get a choice.
+      forceKill = setTimeout(() => killGroup(pid!, "SIGKILL"), killGraceMs);
     }, timeoutMs);
 
     // Decode as UTF-8 per stream, so a character split across two chunks stays intact.
@@ -65,6 +82,7 @@ export const runCommand = ({ bin, args, directory, log, timeoutMs, onOutput }: C
     });
     child.on("close", (exitCode) => {
       clearTimeout(timer);
+      clearTimeout(forceKill);
       if (pid) running.delete(pid);
       emit(log.end());
       resolve({ exitCode, output, finalText: log.finalText });

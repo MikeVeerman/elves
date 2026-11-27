@@ -4,6 +4,7 @@ import { Supervisor } from "../src/supervisor.ts";
 import { createApp } from "../src/app.ts";
 import { LiveRuns } from "../src/live.ts";
 import type { ModelLists } from "../src/models.ts";
+import { homedir } from "node:os";
 import { factoryInput } from "./helpers.ts";
 
 function form(fields: Record<string, string>) {
@@ -137,6 +138,18 @@ describe("web app", () => {
       expect(html).toContain('<option value="fw/deepseek">fw/deepseek</option>');
     });
 
+    it("limits the minutes to one week", async () => {
+      const html = await (await app.request("/factories/new")).text();
+
+      expect(html.match(/max="10080"/g)).toHaveLength(2);
+    });
+
+    it("accepts exactly one week", async () => {
+      const res = await app.request("/factories", form({ ...validForm, idleMinutes: "10080", maxRunMinutes: "10080" }));
+
+      expect(res.status).toBe(303);
+    });
+
     it("fills in the default wait and max run times", async () => {
       const html = await (await app.request("/factories/new")).text();
 
@@ -184,6 +197,8 @@ describe("web app", () => {
       ["a wait time of zero", { idleMinutes: "0" }],
       ["a max run time that is not a number", { maxRunMinutes: "soon" }],
       ["a fractional wait time", { idleMinutes: "1.5" }],
+      ["a wait time over a week", { idleMinutes: "10081" }],
+      ["a max run time over a week", { maxRunMinutes: "10081" }],
     ])("rejects %s", async (_, change) => {
       const res = await app.request("/factories", form({ ...validForm, ...change }));
 
@@ -223,6 +238,32 @@ describe("web app", () => {
       expect(html).toContain('<option value="claude-old-1" selected>claude-old-1</option>');
     });
 
+    it("says when only the latest runs are shown", async () => {
+      for (let i = 0; i < 51; i++) store.startRun(id);
+
+      const html = await (await app.request(`/factories/${id}`)).text();
+
+      expect(html).toContain("Showing the latest 50 of 51 runs.");
+    });
+
+    it("warns when another elf works in the same folder", async () => {
+      store.updateFactory(id, factoryInput({ directory: "~/projects/shop" }));
+      store.createFactory(factoryInput({ name: "Twin", directory: `${homedir()}/projects/shop/` }));
+      store.createFactory(factoryInput({ name: "Elsewhere", directory: "~/projects/other" }));
+
+      const html = await (await app.request(`/factories/${id}`)).text();
+
+      expect(html).toContain("Twin");
+      expect(html).toContain("also works in this folder");
+      expect(html).not.toContain("Elsewhere");
+    });
+
+    it("doesn't warn when the folder is not shared", async () => {
+      const html = await (await app.request(`/factories/${id}`)).text();
+
+      expect(html).not.toContain("also works in this folder");
+    });
+
     it("returns 404 for an unknown factory", async () => {
       expect((await app.request("/factories/999")).status).toBe(404);
     });
@@ -247,6 +288,24 @@ describe("web app", () => {
 
       await app.request(`/factories/${id}/stop`, { method: "POST" });
       expect(supervisor.status(id).state).toBe("stopping");
+    });
+
+    it("won't fire an elf that is still working, so its agent can't outlive it", async () => {
+      supervisor.start(id);
+
+      const res = await app.request(`/factories/${id}/delete`, { method: "POST" });
+
+      expect(res.status).toBe(409);
+      expect(store.getFactory(id)).toBeDefined();
+    });
+
+    it("only offers the fire button when the elf is stopped", async () => {
+      supervisor.start(id);
+
+      const html = await (await app.request(`/factories/${id}`)).text();
+
+      expect(html).not.toContain("Fire this elf");
+      expect(html).toContain("Stop this elf first");
     });
 
     it("deletes the factory", async () => {

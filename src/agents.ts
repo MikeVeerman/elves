@@ -21,24 +21,26 @@ export const runAgent: RunAgent = ({ agent, model, prompt, ...rest }) =>
  * The command line that runs an agent once, without a human in the loop.
  * Every agent gets full access (no permission prompts), like pi has by default:
  * nobody is there to answer a prompt, so a factory would stall otherwise.
+ * The prompt always comes after "--", so a prompt starting with "-" isn't read as an option.
  */
 export function agentCommand(agent: AgentName, prompt: string, model: string): { bin: string; args: string[] } {
   const modelArgs = model ? ["--model", model] : [];
+  const promptArgs = ["--", prompt];
   switch (agent) {
     case "pi":
-      return { bin: "pi", args: ["--mode", "json", ...modelArgs, "-p", prompt] };
+      return { bin: "pi", args: ["--mode", "json", ...modelArgs, "-p", ...promptArgs] };
     case "claude":
       return {
         bin: "claude",
-        args: ["-p", prompt, "--output-format", "stream-json", "--verbose", "--dangerously-skip-permissions", ...modelArgs],
+        args: ["-p", "--output-format", "stream-json", "--verbose", "--dangerously-skip-permissions", ...modelArgs, ...promptArgs],
       };
     case "codex":
       return {
         bin: "codex",
-        args: ["exec", "--json", "--dangerously-bypass-approvals-and-sandbox", "--skip-git-repo-check", ...modelArgs, prompt],
+        args: ["exec", "--json", "--dangerously-bypass-approvals-and-sandbox", "--skip-git-repo-check", ...modelArgs, ...promptArgs],
       };
     case "opencode":
-      return { bin: "opencode", args: ["run", "--format", "json", ...modelArgs, prompt] };
+      return { bin: "opencode", args: ["run", "--format", "json", ...modelArgs, ...promptArgs] };
   }
 }
 

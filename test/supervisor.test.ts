@@ -39,6 +39,11 @@ describe("classify", () => {
     expect(classify({ exitCode: 1, finalText: NO_TASK_MARKER })).toBe("failed");
   });
 
+  it("is 'failed' when the agent exits 0 without a final message, so the elf waits instead of looping", () => {
+    expect(classify({ exitCode: 0, finalText: "" })).toBe("failed");
+    expect(classify({ exitCode: 0, finalText: "  \n" })).toBe("failed");
+  });
+
   it("is 'failed' when pi was killed (no exit code)", () => {
     expect(classify({ exitCode: null, finalText: "" })).toBe("failed");
   });
