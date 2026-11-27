@@ -10,7 +10,17 @@ import { elf, moodFor } from "./elves.ts";
 import { expandHome } from "./runner.ts";
 import { credentialsMatch, endSession, requireLogin, startSession, type AuthConfig } from "./auth.ts";
 import { page, type Html } from "./layout.ts";
-import { NEW_FACTORY, INVALID_FORM, readFactoryForm, factoryForm } from "./form.ts";
+import {
+  NEW_FACTORY,
+  INVALID_FORM,
+  readFactoryForm,
+  factoryForm,
+  readScheduleForm,
+  schedulePreview,
+  formatWhen,
+} from "./form.ts";
+import { describeCron } from "./schedule.ts";
+import type { Factory } from "./store.ts";
 
 type Deps = { store: Store; supervisor: Supervisor; live: LiveRuns; models: ModelLists; auth: AuthConfig };
 
@@ -59,16 +69,16 @@ export function createApp({ store, supervisor, live, models, auth }: Deps) {
                 <p>No elves yet. Hire your first one to start on the backlog.</p>
               </div>`
             : html`<table>
-                <tr><th></th><th>Elf</th><th>Agent</th><th>Model</th><th>Directory</th><th>Status</th></tr>
+                <tr><th></th><th>Elf</th><th>Runs</th><th>Agent</th><th>Model</th><th>Status</th></tr>
                 ${factories.map((f) => {
                   const status = supervisor.status(f.id);
                   return html`<tr>
-                    <td class="avatar">${elf(moodFor(status), 32)}</td>
-                    <td><a href="/factories/${f.id}">${f.name}</a></td>
+                    <td class="avatar">${elf(moodFor(status), 32, f.kind)}</td>
+                    <td><a href="/factories/${f.id}">${f.name}</a><br><code class="dir">${f.directory}</code></td>
+                    <td>${runsLabel(f)}</td>
                     <td>${f.agent}</td>
                     <td>${f.model || "default"}</td>
-                    <td><code>${f.directory}</code></td>
-                    <td>${statusPill(status)}</td>
+                    <td>${statusPill(status, f)}</td>
                   </tr>`;
                 })}
               </table>`}
@@ -116,11 +126,14 @@ export function createApp({ store, supervisor, live, models, auth }: Deps) {
         html`
           <p><a href="/">&larr; All elves</a></p>
           <div class="hero">
-            ${elf(moodFor(status), 96)}
+            ${elf(moodFor(status), 96, factory.kind)}
             <div>
               <h1>${factory.name}</h1>
+              <p class="kind-line">${factory.kind === "timed" ? "Timed" : "Loop"}${factory.kind === "timed"
+                ? html` · ${describeCron(factory.schedule)}`
+                : ""}</p>
               <div class="status-line">
-                ${statusPill(status)}
+                ${statusPill(status, factory)}
                 ${controlButton(factory.id, status)}
               </div>
             </div>
@@ -153,6 +166,7 @@ export function createApp({ store, supervisor, live, models, auth }: Deps) {
     const input = await readFactoryForm(c.req.raw);
     if (!input) return c.text(INVALID_FORM, 400);
     store.updateFactory(id, input);
+    supervisor.settingsChanged(id);
     return c.redirect(`/factories/${id}`, 303);
   });
 
@@ -182,6 +196,12 @@ export function createApp({ store, supervisor, live, models, auth }: Deps) {
     }
     store.deleteFactory(id);
     return c.redirect("/", 303);
+  });
+
+  // Live preview for the schedule builder: the cron expression, a description and the next runs.
+  app.get("/schedule/preview", (c) => {
+    const preview = schedulePreview(readScheduleForm((key) => (c.req.query(key) ?? "").trim()));
+    return c.json(preview, "error" in preview ? 400 : 200);
   });
 
   app.get("/runs/:id", (c) => {
@@ -274,11 +294,17 @@ function controlButton(id: number, status: Status): Html {
   </form>`;
 }
 
-function statusPill(status: Status): Html {
+function runsLabel(factory: Factory): string {
+  return factory.kind === "timed" ? describeCron(factory.schedule) : "Loop";
+}
+
+function statusPill(status: Status, factory: Factory): Html {
   const label =
-    status.state === "sleeping"
-      ? `sleeping until ${status.until.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`
-      : status.state;
+    status.state !== "sleeping"
+      ? status.state
+      : factory.kind === "timed"
+        ? `next run ${formatWhen(status.until)}`
+        : `sleeping until ${status.until.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
   return html`<span class="pill pill-${moodFor(status)}">${label}</span>`;
 }
 

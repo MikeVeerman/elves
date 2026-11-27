@@ -21,6 +21,8 @@ describe("Store", () => {
         directory: "/tmp/docs",
         agent: "claude",
         model: "claude-sonnet-5-5",
+        kind: "timed",
+        schedule: "0 9 * * 1-5",
         idleMinutes: 10,
         maxRunMinutes: 45,
       });
@@ -139,7 +141,15 @@ describe("Store", () => {
 
     const [factory] = new Store(path).listFactories();
 
-    expect(factory).toMatchObject({ name: "old", agent: "pi", model: "", idleMinutes: 30, maxRunMinutes: 60 });
+    expect(factory).toMatchObject({
+      name: "old",
+      kind: "loop",
+      schedule: "",
+      agent: "pi",
+      model: "",
+      idleMinutes: 30,
+      maxRunMinutes: 60,
+    });
   });
 
   describe("permissions warning", () => {

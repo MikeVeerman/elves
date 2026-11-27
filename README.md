@@ -2,16 +2,20 @@
 
 **Your backlog gets done while you sleep.**
 
-Elves runs coding agents in a loop. Each elf takes the next task from a backlog, does it, and
-goes back for more. When the backlog is empty, it naps and checks again later.
+Elves runs coding agents for you. A **loop elf** takes the next task from a backlog, does it, and
+goes back for more; when the backlog is empty, it naps and checks again later. A **timed elf** runs
+its prompt on a schedule, like a cron job: a report every weekday morning, a dependency check on the
+1st of the month.
 
 ![The Elves web interface](docs/screenshot.png)
 
 ## How an elf works
 
-An elf is a loop around a coding agent: [pi](https://github.com/badlogic/pi-mono),
+Every elf drives a coding agent: [pi](https://github.com/badlogic/pi-mono),
 [Claude Code](https://docs.claude.com/en/docs/claude-code), [Codex](https://github.com/openai/codex)
 or [opencode](https://opencode.ai).
+
+### Loop elves (green hat)
 
 ```
 forever:
@@ -27,11 +31,30 @@ the agent can reach. For example:
 
 > Take the oldest open GitHub issue labeled `elves`, implement it, open a PR and comment on the issue.
 
-To know when to nap, Elves adds one line to every prompt: if there is no task, the agent must end its
-reply with `NO_TASK_AVAILABLE`.
+To know when to nap, Elves adds one line to a loop elf's prompt: if there is no task, the agent must
+end its reply with `NO_TASK_AVAILABLE`.
+
+### Timed elves (blue hat)
+
+```
+forever:
+  wait for the next time on the schedule
+  run the agent once, with the elf's prompt, in the elf's directory
+  save the run
+```
+
+The prompt is sent exactly as written. If a run is still going when the next time comes, that time is
+skipped, so runs never overlap.
+
+Setting a schedule doesn't need cron knowledge: pick **Every few minutes**, **Every hour**, **Every
+day**, **Every weekday**, **Every week** or **Every month**, and fill in the time. The form shows the
+schedule in words ("At 07:45, Monday through Friday") and the next three run times. **Custom** takes
+any five-part cron expression (`minute hour day month weekday`) for anything else. Times are in the
+server's time zone.
 
 ## Features
 
+- **Loop or timed**: work through a backlog, or run on a schedule with an easy schedule picker.
 - **Any of four agents**: pi, Claude Code, Codex or opencode, picked per elf.
 - **Model dropdown** filled from each agent's own model list (`pi --list-models`, `opencode models`,
   `~/.codex/models_cache.json`; Claude has a fixed list).
@@ -42,18 +65,21 @@ reply with `NO_TASK_AVAILABLE`.
 - **Login** with a username and password, safe to share over a tailnet.
 - **Survives restarts**: elves that were working start again when the server comes back up.
 - **Pixel-art elves** that hammer while working, snooze while napping, and go grey when stopped.
+  Loop elves wear green hats, timed elves blue ones.
 
 ## Settings per elf
 
 | Setting | Meaning |
 |---|---|
 | Name | Shown in the list |
+| Type | **Loop** (works through a backlog) or **Timed** (runs on a schedule) |
+| Schedule | Timed elves only: when to run, picked from simple choices or as a cron expression |
 | Agent | `pi`, `claude`, `codex` or `opencode` |
 | Model | One of the agent's models, or "agent default" |
 | Working directory | Where the agent runs. `~` works |
-| Wait when there's nothing to do | Minutes to nap before checking again (default 30). Also used after a failed run |
+| Wait when there's nothing to do | Loop elves only: minutes to nap before checking again (default 30). Also used after a failed run |
 | Max run time | Minutes one run may take before it's stopped and marked failed (default 60) |
-| Prompt | Where the backlog is and how to pick the next item |
+| Prompt | Loop elves: where the backlog is and how to pick the next item. Timed elves: what to do each time |
 
 ## Getting started
 
@@ -119,6 +145,8 @@ Tailscale encrypts the traffic between your devices).
 - **The elf page** shows the latest 50 runs, and warns when another elf works in the same folder.
 - **Stopping the server** (Ctrl-C) also stops any agent that is still running. A run that gets cut
   off shows as `interrupted`.
+- **Changing a timed elf's schedule** takes effect right away, even while it's waiting.
+- **Starting a timed elf** doesn't run it straight away; it waits for the next time on its schedule.
 - **Model lists** are read once at startup. Restart the server to pick up new models.
 
 ## Development
@@ -135,7 +163,8 @@ There's no build step: Node runs the TypeScript directly and uses its built-in `
 |---|---|
 | `src/server.ts` | Starts everything |
 | `src/auth.ts` | Login, session cookie, cross-site check |
-| `src/supervisor.ts` | The loop: run, record, nap |
+| `src/supervisor.ts` | The loops: run, record, nap (loop elves) or wait for the schedule (timed elves) |
+| `src/schedule.ts` | Schedule choices ↔ cron expressions, descriptions and next run times |
 | `src/agents.ts` | The command line for each agent |
 | `src/runner.ts` | Runs an agent process, with the max run time and force stop |
 | `src/parsers.ts` | Turns each agent's JSON output into a readable log |
@@ -144,6 +173,7 @@ There's no build step: Node runs the TypeScript directly and uses its built-in `
 | `src/store.ts` | SQLite storage for elves, runs and settings |
 | `src/app.ts` | The web routes |
 | `src/form.ts` | The elf settings form and its validation |
+| `src/form-scripts.ts` | Browser scripts for the form: model list and schedule preview |
 | `src/layout.ts` | The page shell and CSS |
 | `src/elves.ts` | The pixel-art elves |
 

@@ -20,7 +20,7 @@ export function page(title: string | undefined, body: Html, { loggedIn = true } 
       <body>
         <header class="site-header">
           <a href="/" class="brand">
-            <span class="crew">${elf("working", 52)}${elf("sleeping", 52)}${elf("working", 52)}</span>
+            <span class="crew">${elf("working", 52)}${elf("sleeping", 52, "timed")}${elf("working", 52)}</span>
             <span>
               <span class="logo">ELVES</span>
               <span class="tagline">Your backlog gets done while you sleep.</span>
@@ -93,7 +93,18 @@ const STYLE = `
   input, textarea, select { display: block; width: 100%; margin-top: .3rem; font: 400 1rem system-ui, sans-serif;
     padding: .45rem .55rem; background: white; border: 2px solid var(--ink); border-radius: 0; }
   input:focus, textarea:focus, select:focus { outline: 3px solid var(--gold); outline-offset: 0; }
-  .row { display: flex; gap: 1rem; }
+  .row { display: flex; gap: 1rem; flex-wrap: wrap; }
+  [hidden] { display: none !important; }
+  fieldset { border: 2px solid var(--ink); background: var(--card); margin: 0 0 1rem; padding: .8rem 1rem .4rem; }
+  legend { font-family: var(--pixel); font-size: .6rem; padding: 0 .4rem; }
+  .choice { display: flex; gap: .6rem; align-items: baseline; font-weight: 400; }
+  .choice input { width: auto; margin: 0; }
+  .schedule { border-color: #3f6fd1; }
+  .preview { background: #eef3fc; border-left: 4px solid #3f6fd1; padding: .2rem .8rem; margin-bottom: .8rem; }
+  .preview p { margin: .4rem 0; }
+  .bad { color: var(--red); font-weight: 600; }
+  .kind-line { color: var(--muted); margin: 0 0 .5rem; }
+  code.dir { color: var(--muted); font-size: .75rem; }
   .row > label { flex: 1; }
 
   pre { background: #1d1a16; color: #f3ead8; padding: 1rem; overflow-x: auto; white-space: pre-wrap;

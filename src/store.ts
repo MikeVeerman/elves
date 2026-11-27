@@ -6,6 +6,10 @@ export type Factory = {
   name: string;
   prompt: string;
   directory: string;
+  /** A loop elf works through a backlog; a timed elf runs on its cron schedule. */
+  kind: ElfKind;
+  /** Cron expression for a timed elf; empty for a loop elf. */
+  schedule: string;
   agent: AgentName;
   /** Empty means: the agent's own default model. */
   model: string;
@@ -17,6 +21,8 @@ export type Factory = {
 };
 
 export type FactoryInput = Omit<Factory, "id" | "enabled">;
+
+export type ElfKind = "loop" | "timed";
 
 export type RunStatus = "running" | "done" | "idle" | "failed" | "interrupted";
 
@@ -66,6 +72,8 @@ const ADDED_FACTORY_COLUMNS = {
   model: "TEXT NOT NULL DEFAULT ''",
   idle_minutes: "INTEGER NOT NULL DEFAULT 30",
   max_run_minutes: "INTEGER NOT NULL DEFAULT 60",
+  kind: "TEXT NOT NULL DEFAULT 'loop'",
+  schedule: "TEXT NOT NULL DEFAULT ''",
 };
 
 const RUN_COLUMNS = `id, factory_id AS factoryId, status, exit_code AS exitCode, output,
@@ -91,8 +99,8 @@ export class Store {
   createFactory(input: FactoryInput): number {
     const result = this.db
       .prepare(
-        `INSERT INTO factories (name, prompt, directory, agent, model, idle_minutes, max_run_minutes)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO factories (name, prompt, directory, agent, model, idle_minutes, max_run_minutes, kind, schedule)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(...factoryValues(input));
     return Number(result.lastInsertRowid);
@@ -111,7 +119,7 @@ export class Store {
     this.db
       .prepare(
         `UPDATE factories SET name = ?, prompt = ?, directory = ?, agent = ?, model = ?,
-         idle_minutes = ?, max_run_minutes = ? WHERE id = ?`,
+         idle_minutes = ?, max_run_minutes = ?, kind = ?, schedule = ? WHERE id = ?`,
       )
       .run(...factoryValues(input), id);
   }
@@ -169,7 +177,17 @@ export class Store {
 }
 
 function factoryValues(input: FactoryInput) {
-  return [input.name, input.prompt, input.directory, input.agent, input.model, input.idleMinutes, input.maxRunMinutes];
+  return [
+    input.name,
+    input.prompt,
+    input.directory,
+    input.agent,
+    input.model,
+    input.idleMinutes,
+    input.maxRunMinutes,
+    input.kind,
+    input.schedule,
+  ];
 }
 
 function toFactory(row: Record<string, unknown>): Factory {
@@ -178,6 +196,8 @@ function toFactory(row: Record<string, unknown>): Factory {
     name: row.name as string,
     prompt: row.prompt as string,
     directory: row.directory as string,
+    kind: row.kind as ElfKind,
+    schedule: row.schedule as string,
     agent: row.agent as AgentName,
     model: row.model as string,
     idleMinutes: row.idle_minutes as number,
