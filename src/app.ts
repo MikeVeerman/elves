@@ -9,11 +9,12 @@ import type { ModelLists } from "./models.ts";
 import { AGENTS, type AgentName } from "./agents.ts";
 import { elf, moodFor } from "./elves.ts";
 import { expandHome } from "./runner.ts";
+import { credentialsMatch, endSession, requireLogin, startSession, type AuthConfig } from "./auth.ts";
 import { resolve } from "node:path";
 
 type Html = HtmlEscapedString | Promise<HtmlEscapedString>;
 
-type Deps = { store: Store; supervisor: Supervisor; live: LiveRuns; models: ModelLists };
+type Deps = { store: Store; supervisor: Supervisor; live: LiveRuns; models: ModelLists; auth: AuthConfig };
 
 const NEW_FACTORY: FactoryInput = {
   name: "",
@@ -30,8 +31,26 @@ const MAX_MINUTES = 7 * 24 * 60;
 
 const INVALID_FORM = `Please fill in a name, prompt and directory, pick an agent, and use whole minutes from 1 to ${MAX_MINUTES}.`;
 
-export function createApp({ store, supervisor, live, models }: Deps) {
+export function createApp({ store, supervisor, live, models, auth }: Deps) {
   const app = new Hono();
+
+  // The login page is the only thing reachable without a session.
+  app.get("/login", (c) => c.html(loginPage()));
+
+  app.post("/login", async (c) => {
+    const body = await c.req.formData();
+    const given = { username: String(body.get("username") ?? ""), password: String(body.get("password") ?? "") };
+    if (!credentialsMatch(given, auth)) return c.html(loginPage("Wrong username or password."), 401);
+    await startSession(c, auth);
+    return c.redirect("/", 303);
+  });
+
+  app.use("*", requireLogin(auth));
+
+  app.post("/logout", (c) => {
+    endSession(c);
+    return c.redirect("/login", 303);
+  });
 
   app.get("/", (c) => {
     const factories = store.listFactories();
@@ -340,7 +359,25 @@ function followLive(runId: number): Html {
     </script>`;
 }
 
-function page(title: string | undefined, body: Html): Html {
+function loginPage(error?: string): Html {
+  return page(
+    "Log in",
+    html`
+      <div class="login">
+        <h1>Log in</h1>
+        ${error ? html`<p class="warning">${error}</p>` : ""}
+        <form method="post" action="/login">
+          <label>Username <input name="username" autocomplete="username" required autofocus></label>
+          <label>Password <input type="password" name="password" autocomplete="current-password" required></label>
+          <button>Log in</button>
+        </form>
+      </div>
+    `,
+    { loggedIn: false },
+  );
+}
+
+function page(title: string | undefined, body: Html, { loggedIn = true } = {}): Html {
   return html`<!doctype html>
     <html lang="en">
       <head>
@@ -361,6 +398,9 @@ function page(title: string | undefined, body: Html): Html {
               <span class="tagline">Your backlog gets done while you sleep.</span>
             </span>
           </a>
+          ${loggedIn
+            ? html`<form method="post" action="/logout" class="logout"><button>Log out</button></form>`
+            : ""}
         </header>
         <main>${body}</main>
       </body>
@@ -381,7 +421,11 @@ const STYLE = `
   h1 { font-size: 1.25rem; margin: 0 0 .5rem; }
   h2 { font-size: .8rem; margin: 2.5rem 0 1rem; color: var(--pine); }
 
-  .site-header { background: var(--pine); border-bottom: 6px solid var(--gold); }
+  .site-header { background: var(--pine); border-bottom: 6px solid var(--gold); position: relative; }
+  .logout { position: absolute; top: 1rem; right: 1rem; }
+  .logout button { background: transparent; color: var(--bg); box-shadow: none; border-color: var(--bg);
+    font-size: .55rem; padding: .5rem .7rem; }
+  .login { max-width: 22rem; margin: 2rem auto; }
   .brand { display: flex; align-items: center; gap: 1.25rem; max-width: 60rem; margin: 0 auto;
     padding: 1rem; text-decoration: none; }
   .crew { display: flex; gap: .25rem; align-items: flex-end; }

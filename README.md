@@ -59,18 +59,34 @@ You need **Node 24 or newer**, plus at least one of the agents installed and log
 
 ```sh
 npm install
-npm start          # http://localhost:3000
+ELVES_USERNAME=me ELVES_PASSWORD='something long' npm start    # http://localhost:3000
 ```
 
-Open the page, click **+ New elf**, fill in the form, and press **Start**.
+Log in, click **+ New elf**, fill in the form, and press **Start**.
 
 Environment variables:
 
 | Variable  | Default      | Meaning |
 |-----------|--------------|---------|
+| `ELVES_USERNAME` | (required) | Username for the web interface |
+| `ELVES_PASSWORD` | (required) | Password for the web interface |
 | `HOST`    | `127.0.0.1`  | Address to listen on |
 | `PORT`    | `3000`       | Web interface port |
 | `DB_PATH` | `factory.db` | SQLite file with elves and runs |
+
+The server won't start without a username and password. Restarting it logs you out.
+
+### Reaching Elves from your tailnet
+
+Keep Elves on localhost and let [Tailscale Serve](https://tailscale.com/kb/1312/serve) share it
+with your tailnet over HTTPS:
+
+```sh
+tailscale serve --bg 3000      # https://<machine>.<tailnet>.ts.net
+```
+
+Or listen on the machine's tailnet address directly with `HOST=<tailscale-ip>` (plain HTTP, but
+Tailscale encrypts the traffic between your devices).
 
 ## ⚠️ Safety
 
@@ -79,12 +95,21 @@ Environment variables:
   and opencode allow everything by default. Nobody is around to approve anything, so an elf would
   get stuck otherwise. Only point elves at directories and backlogs you trust: whoever can write
   to the backlog can tell the agent what to do.
-- **There is no login.** The server only listens on `127.0.0.1` by default. Don't expose it to a
-  network without putting authentication in front of it.
+- **Anyone who can log in can make agents do anything.** Pick a strong password, and don't expose
+  Elves to the open internet.
+- **Other websites can't use your session.** The session cookie is signed and `SameSite=Lax`, so the
+  browser leaves it off form posts from other sites, and requests that the browser marks as
+  cross-site are refused. A random web page you visit can't create or start an elf.
 
 ## Good to know
 
 - **Stopping an elf** lets its current run finish first. Stopping a napping elf takes effect at once.
+- **Firing (deleting) an elf** is only possible once it's stopped.
+- **The max run time** first asks the agent to stop; if it's still running 5 seconds later, it's killed.
+- **A run that ends without a final message** counts as failed, so the elf naps instead of retrying
+  in a tight loop.
+- **Wait and max run time** go up to one week.
+- **The elf page** shows the latest 50 runs, and warns when another elf works in the same folder.
 - **Stopping the server** (Ctrl-C) also stops any agent that is still running. A run that gets cut
   off shows as `interrupted`.
 - **Model lists** are read once at startup. Restart the server to pick up new models.
@@ -102,6 +127,7 @@ There's no build step: Node runs the TypeScript directly and uses its built-in `
 | File | What it does |
 |---|---|
 | `src/server.ts` | Starts everything |
+| `src/auth.ts` | Login, session cookie, cross-site check |
 | `src/supervisor.ts` | The loop: run, record, nap |
 | `src/agents.ts` | The command line for each agent |
 | `src/runner.ts` | Runs an agent process, with the max run time |
