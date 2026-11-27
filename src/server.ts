@@ -6,6 +6,8 @@ import { runPi } from "./pi.ts";
 import { createApp } from "./app.ts";
 
 const port = Number(process.env.PORT ?? 3000);
+// No login, and a factory can run any prompt: only listen on localhost unless told otherwise.
+const hostname = process.env.HOST ?? "127.0.0.1";
 const store = new Store(process.env.DB_PATH ?? "factory.db");
 
 const supervisor = new Supervisor({
@@ -18,6 +20,6 @@ const supervisor = new Supervisor({
 });
 supervisor.resume();
 
-serve({ fetch: createApp({ store, supervisor }).fetch, port }, () => {
-  console.log(`Software factory running on http://localhost:${port}`);
+serve({ fetch: createApp({ store, supervisor }).fetch, port, hostname }, () => {
+  console.log(`Software factory running on http://${hostname}:${port}`);
 });

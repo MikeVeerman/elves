@@ -29,6 +29,7 @@ Settings (environment variables):
 
 | Variable  | Default      | Meaning                  |
 |-----------|--------------|--------------------------|
+| `HOST`    | `127.0.0.1`  | Address to listen on (there is no login, so keep it local) |
 | `PORT`    | `3000`       | Web interface port       |
 | `DB_PATH` | `factory.db` | SQLite file              |
 | `PI_BIN`  | `pi`         | Path to the pi binary    |
