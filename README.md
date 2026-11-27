@@ -173,6 +173,7 @@ There's no build step: Node runs the TypeScript directly and uses its built-in `
 | `src/store.ts` | SQLite storage for elves, runs and settings |
 | `src/app.ts` | The web routes |
 | `src/form.ts` | The elf settings form and its validation |
+| `src/form-scripts.ts` | Browser scripts for the form: model list and schedule preview |
 | `src/layout.ts` | The page shell and CSS |
 | `src/elves.ts` | The pixel-art elves |
 
