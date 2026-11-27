@@ -178,3 +178,7 @@ There's no build step: Node runs the TypeScript directly and uses its built-in `
 | `src/elves.ts` | The pixel-art elves |
 
 In the code, an elf is called a *factory*.
+
+## License
+
+[MIT](LICENSE) © 2026 Mike Veerman
