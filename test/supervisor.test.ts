@@ -5,6 +5,7 @@ import { Supervisor, buildPrompt, classify, NO_TASK_MARKER } from "../src/superv
 import type { AgentRequest } from "../src/agents.ts";
 import type { RunResult as PiResult } from "../src/runner.ts";
 import { factoryInput } from "./helpers.ts";
+import { nextRuns } from "../src/schedule.ts";
 
 /** A promise we can resolve from the test. */
 function deferred<T = void>() {
@@ -286,6 +287,104 @@ describe("Supervisor", () => {
       supervisor.start(factoryId);
 
       await vi.waitFor(() => expect(piCalls).toHaveLength(2));
+    });
+  });
+
+  describe("timed elves", () => {
+    const DAY = 24 * 60 * 60_000;
+    let clock: number;
+    let timedId: number;
+
+    beforeEach(() => {
+      clock = new Date(2026, 10, 27, 12, 0).getTime(); // Friday 12:00
+      supervisor = new Supervisor({
+        store,
+        live,
+        now: () => clock,
+        runAgent: async (request) => {
+          piCalls.push(request);
+          // The timed elf reports; a loop elf finds nothing to do (so it naps instead of spinning).
+          return request.prompt === "Write the daily report." ? did("Wrote the report.") : idle;
+        },
+        sleep: (ms, signal) => {
+          const { promise, resolve } = deferred();
+          sleeps.push({ ms, signal, done: resolve });
+          signal.addEventListener("abort", () => resolve());
+          return promise;
+        },
+      });
+      timedId = store.createFactory(
+        factoryInput({ name: "Reporter", kind: "timed", schedule: "0 13 * * *", prompt: "Write the daily report." }),
+      );
+    });
+
+    it("waits for the next scheduled time instead of running right away", async () => {
+      supervisor.start(timedId);
+
+      await vi.waitFor(() => expect(sleeps).toHaveLength(1));
+      expect(piCalls).toHaveLength(0);
+      expect(sleeps[0].ms).toBe(60 * 60_000);
+      expect(supervisor.status(timedId)).toEqual({ state: "sleeping", until: new Date(2026, 10, 27, 13, 0) });
+    });
+
+    it("runs the prompt as written when the time comes, then waits for the next time", async () => {
+      supervisor.start(timedId);
+      await vi.waitFor(() => expect(sleeps).toHaveLength(1));
+
+      clock = new Date(2026, 10, 27, 13, 0).getTime();
+      sleeps[0].done();
+
+      await vi.waitFor(() => expect(sleeps).toHaveLength(2));
+      expect(piCalls).toHaveLength(1);
+      expect(piCalls[0].prompt).toBe("Write the daily report.");
+      expect(store.listRuns(timedId)[0]).toMatchObject({ status: "done" });
+      expect(supervisor.status(timedId)).toEqual({ state: "sleeping", until: new Date(2026, 10, 28, 13, 0) });
+    });
+
+    it("waits in chunks of at most a day, and doesn't run before the time", async () => {
+      store.updateFactory(timedId, { ...store.getFactory(timedId)!, schedule: "0 9 1 * *" }); // 1st of the month
+      supervisor.start(timedId);
+      await vi.waitFor(() => expect(sleeps).toHaveLength(1));
+      expect(sleeps[0].ms).toBe(DAY);
+
+      clock += DAY;
+      sleeps[0].done();
+
+      await vi.waitFor(() => expect(sleeps).toHaveLength(2));
+      expect(piCalls).toHaveLength(0);
+      expect(supervisor.status(timedId)).toMatchObject({ until: nextRuns("0 9 1 * *", 1, new Date(clock - DAY))[0] });
+    });
+
+    it("picks up a new schedule right away when its settings change", async () => {
+      supervisor.start(timedId);
+      await vi.waitFor(() => expect(sleeps).toHaveLength(1));
+
+      store.updateFactory(timedId, { ...store.getFactory(timedId)!, schedule: "30 12 * * *" });
+      supervisor.settingsChanged(timedId);
+
+      await vi.waitFor(() => expect(sleeps).toHaveLength(2));
+      expect(piCalls).toHaveLength(0);
+      expect(sleeps[1].ms).toBe(30 * 60_000);
+    });
+
+    it("stops while waiting", async () => {
+      supervisor.start(timedId);
+      await vi.waitFor(() => expect(sleeps).toHaveLength(1));
+
+      supervisor.stop(timedId);
+
+      await vi.waitFor(() => expect(supervisor.status(timedId)).toEqual({ state: "stopped" }));
+      expect(piCalls).toHaveLength(0);
+    });
+
+    it("leaves a napping loop elf alone when its settings change", async () => {
+      supervisor.start(factoryId);
+      await vi.waitFor(() => expect(piCalls).toHaveLength(1));
+      await vi.waitFor(() => expect(sleeps).toHaveLength(1));
+
+      supervisor.settingsChanged(factoryId);
+
+      expect(sleeps[0].signal.aborted).toBe(false);
     });
   });
 

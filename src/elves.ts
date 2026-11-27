@@ -1,5 +1,6 @@
 import { raw } from "hono/html";
 import type { Status } from "./supervisor.ts";
+import type { ElfKind } from "./store.ts";
 
 export type Mood = "working" | "sleeping" | "off" | "alert";
 
@@ -21,6 +22,8 @@ const PALETTE: Record<string, string> = {
   I: "#9aa3ad", // hammer head
   A: "#4a4f57", // anvil
   X: "#e53935", // exclamation mark
+  J: "#3f6fd1", // timed elf's hat
+  j: "#274a91", // timed elf's hat brim
 };
 
 /** The elf, 18 x 16 pixels. "." is transparent. The right side leaves room for the hammer and anvil. */
@@ -75,8 +78,10 @@ export function moodFor(status: Status): Mood {
 }
 
 /** A pixel-art elf as inline SVG. The animations live in the page's CSS (.elf-working, .elf-sleeping). */
-export function elf(mood: Mood, size = 48) {
-  const sprite = mood === "sleeping" ? SPRITE.map((row) => row.replaceAll("E", "C")) : SPRITE;
+/** Loop elves wear green hats; timed elves wear blue ones. */
+export function elf(mood: Mood, size = 48, kind: ElfKind = "loop") {
+  let sprite = mood === "sleeping" ? SPRITE.map((row) => row.replaceAll("E", "C")) : SPRITE;
+  if (kind === "timed") sprite = sprite.map((row) => row.replaceAll("H", "J").replaceAll("h", "j"));
   const parts = [pixels(sprite)];
 
   if (mood === "working") {
@@ -91,7 +96,7 @@ export function elf(mood: Mood, size = 48) {
   }
 
   return raw(
-    `<svg class="elf elf-${mood}" role="img" aria-label="${LABELS[mood]}" viewBox="0 0 18 16" ` +
+    `<svg class="elf elf-${mood}${kind === "timed" ? " elf-timed" : ""}" role="img" aria-label="${LABELS[mood]}" viewBox="0 0 18 16" ` +
       `width="${Math.round((size * 18) / 16)}" height="${size}" shape-rendering="crispEdges">${parts.join("")}</svg>`,
   );
 }

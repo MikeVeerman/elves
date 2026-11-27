@@ -19,6 +19,7 @@ function form(fields: Record<string, string>) {
 }
 
 const validForm = {
+  kind: "loop",
   name: "docs",
   agent: "claude",
   model: "claude-opus-5-5",
@@ -53,7 +54,8 @@ describe("web app", () => {
         new Promise((resolve) =>
           signal?.addEventListener("abort", () => resolve({ exitCode: null, output: "", finalText: "" })),
         ),
-      sleep: () => new Promise(() => {}),
+      // Naps never end by themselves, but waking (stop, new schedule) ends them.
+      sleep: (_ms, signal) => new Promise((resolve) => signal.addEventListener("abort", () => resolve())),
     });
     app = createApp({ store, supervisor, live, models, auth: AUTH });
     cookie = await logIn(app);
@@ -532,6 +534,116 @@ describe("web app", () => {
 
     it("is not shown on the login page", async () => {
       expect(await (await app.request("/login")).text()).not.toContain("permissions-warning");
+    });
+  });
+
+  describe("timed elves", () => {
+    const timedForm = { ...validForm, kind: "timed", repeat: "weekdays", time: "07:45" };
+
+    it("lets you choose between a loop and a timed elf", async () => {
+      const html = await (await req("/factories/new")).text();
+
+      expect(html).toContain('<input type="radio" name="kind" value="loop" checked>');
+      expect(html).toContain('<input type="radio" name="kind" value="timed">');
+    });
+
+    it("offers simple schedule choices, with a preview in words", async () => {
+      const html = await (await req("/factories/new")).text();
+
+      for (const repeat of ["minutes", "hourly", "daily", "weekdays", "weekly", "monthly", "custom"]) {
+        expect(html).toContain(`<option value="${repeat}"`);
+      }
+      expect(html).toContain('<input type="time" name="time" value="09:00"');
+      expect(html).toContain("At 09:00");
+    });
+
+    it("creates a timed elf from the schedule choices", async () => {
+      await req("/factories", form(timedForm));
+
+      expect(store.listFactories()[0]).toMatchObject({ kind: "timed", schedule: "45 7 * * 1-5" });
+    });
+
+    it("creates a timed elf from a custom cron expression", async () => {
+      await req("/factories", form({ ...timedForm, repeat: "custom", cron: "0 9,17 * * *" }));
+
+      expect(store.listFactories()[0]).toMatchObject({ kind: "timed", schedule: "0 9,17 * * *" });
+    });
+
+    it("rejects a timed elf with a broken schedule", async () => {
+      const res = await req("/factories", form({ ...timedForm, repeat: "custom", cron: "every morning" }));
+
+      expect(res.status).toBe(400);
+      expect(store.listFactories()).toHaveLength(0);
+    });
+
+    it("doesn't need a valid wait time for a timed elf", async () => {
+      const res = await req("/factories", form({ ...timedForm, idleMinutes: "" }));
+
+      expect(res.status).toBe(303);
+    });
+
+    it("keeps no schedule for a loop elf", async () => {
+      await req("/factories", form({ ...validForm, kind: "loop", repeat: "weekdays" }));
+
+      expect(store.listFactories()[0]).toMatchObject({ kind: "loop", schedule: "" });
+    });
+
+    it("fills in the schedule choices when editing", async () => {
+      const id = store.createFactory(factoryInput({ kind: "timed", schedule: "45 7 * * 1-5" }));
+
+      const html = await (await req(`/factories/${id}`)).text();
+
+      expect(html).toContain('<input type="radio" name="kind" value="timed" checked>');
+      expect(html).toContain('<option value="weekdays" selected>');
+      expect(html).toContain('<input type="time" name="time" value="07:45"');
+      expect(html).toContain("At 07:45, Monday through Friday");
+    });
+
+    it("previews a schedule: the cron expression, in words, and the next runs", async () => {
+      const res = await req("/schedule/preview?repeat=weekly&weekday=0&time=18:00");
+      const body = await res.json();
+
+      expect(body.cron).toBe("0 18 * * 0");
+      expect(body.description).toBe("At 18:00, only on Sunday");
+      expect(body.next).toHaveLength(3);
+      expect(body.next[0]).toMatch(/^Sun /);
+    });
+
+    it("explains a broken schedule in the preview", async () => {
+      const res = await req("/schedule/preview?repeat=custom&cron=nope");
+
+      expect(res.status).toBe(400);
+      expect((await res.json()).error).toContain("not a valid schedule");
+    });
+
+    it("shows timed elves with a blue hat, their schedule and their next run", async () => {
+      const id = store.createFactory(factoryInput({ name: "Reporter", kind: "timed", schedule: "45 7 * * 1-5" }));
+      supervisor.start(id);
+
+      const html = await (await req("/")).text();
+
+      expect(html).toContain("elf-timed");
+      expect(html).toContain("At 07:45, Monday through Friday");
+      expect(html).toContain("next run");
+    });
+
+    it("says Loop for loop elves in the list", async () => {
+      store.createFactory(factoryInput());
+
+      expect(await (await req("/")).text()).toContain("<td>Loop</td>");
+    });
+
+    it("applies a new schedule to a waiting elf right away", async () => {
+      const id = store.createFactory(factoryInput({ kind: "timed", schedule: "0 0 1 1 *" }));
+      supervisor.start(id);
+      await vi.waitFor(() => expect(supervisor.status(id).state).toBe("sleeping"));
+      const before = supervisor.status(id);
+
+      await req(`/factories/${id}`, form({ ...timedForm, repeat: "minutes", everyMinutes: "5" }));
+
+      await vi.waitFor(() => expect(supervisor.status(id)).not.toEqual(before));
+      const after = supervisor.status(id);
+      expect(after.state === "sleeping" && after.until.getTime() - Date.now()).toBeLessThanOrEqual(5 * 60_000);
     });
   });
 });

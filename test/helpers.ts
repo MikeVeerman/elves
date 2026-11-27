@@ -5,6 +5,8 @@ export function factoryInput(overrides: Partial<FactoryInput> = {}): FactoryInpu
     name: "a",
     prompt: "p",
     directory: "/a",
+    kind: "loop",
+    schedule: "",
     agent: "pi",
     model: "",
     idleMinutes: 30,

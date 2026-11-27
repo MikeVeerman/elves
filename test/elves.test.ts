@@ -46,6 +46,17 @@ describe("elf", () => {
     expect(out).toContain('class="exclaim"');
   });
 
+  it("wears a green hat by default, and a blue hat when timed", async () => {
+    const loop = await svg("working");
+    const timed = String(await elf("working", 48, "timed"));
+
+    expect(loop).toContain("#2e8b57");
+    expect(loop).not.toContain("#3f6fd1");
+    expect(timed).toContain('fill="#3f6fd1"');
+    expect(timed).toContain('fill="#274a91"');
+    expect(timed).toContain('class="elf elf-working elf-timed"');
+  });
+
   it("is greyed out when off", async () => {
     expect(await svg("off")).toContain('class="elf elf-off"');
   });
