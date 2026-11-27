@@ -1,5 +1,6 @@
 import type { Store, RunResult } from "./store.ts";
 import type { PiResult, RunPi } from "./pi.ts";
+import type { LiveRuns } from "./live.ts";
 
 export const NO_TASK_MARKER = "NO_TASK_AVAILABLE";
 
@@ -9,9 +10,9 @@ export function buildPrompt(factoryPrompt: string): string {
 If there is no task to pick up, do nothing and end your reply with exactly ${NO_TASK_MARKER} on its own line.`;
 }
 
-export function classify(result: PiResult): RunResult["status"] {
+export function classify(result: Pick<PiResult, "exitCode" | "finalText">): RunResult["status"] {
   if (result.exitCode !== 0) return "failed";
-  return result.output.trimEnd().endsWith(NO_TASK_MARKER) ? "idle" : "done";
+  return result.finalText.trimEnd().endsWith(NO_TASK_MARKER) ? "idle" : "done";
 }
 
 export type Status =
@@ -22,6 +23,7 @@ export type Status =
 
 type Options = {
   store: Store;
+  live: LiveRuns;
   runPi: RunPi;
   piBin: string;
   idleDelayMs: number;
@@ -83,19 +85,27 @@ export class Supervisor {
   }
 
   private async runOnce(factoryId: number): Promise<RunResult["status"]> {
-    const { store, runPi, piBin } = this.options;
+    const { store, live, runPi, piBin } = this.options;
     const factory = store.getFactory(factoryId)!;
     const runId = store.startRun(factoryId);
+    live.start(runId);
 
     let result: RunResult;
     try {
-      const pi = await runPi({ bin: piBin, prompt: buildPrompt(factory.prompt), directory: factory.directory });
-      result = { status: classify(pi), ...pi };
+      const pi = await runPi({
+        bin: piBin,
+        prompt: buildPrompt(factory.prompt),
+        directory: factory.directory,
+        onOutput: (text) => live.append(runId, text),
+      });
+      result = { status: classify(pi), exitCode: pi.exitCode, output: pi.output };
     } catch (error) {
       result = { status: "failed", exitCode: null, output: (error as Error).message };
     }
 
+    // Save first, so a watcher that reloads on "end" finds the finished run.
     store.finishRun(runId, result);
+    live.finish(runId);
     return result.status;
   }
 

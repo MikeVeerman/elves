@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { Store } from "../src/store.ts";
+import { LiveRuns } from "../src/live.ts";
 import { Supervisor, buildPrompt, classify, NO_TASK_MARKER } from "../src/supervisor.ts";
 import type { PiRequest, PiResult } from "../src/pi.ts";
 
@@ -21,21 +22,28 @@ describe("buildPrompt", () => {
 
 describe("classify", () => {
   it("is 'done' when pi exits 0 without the marker", () => {
-    expect(classify({ exitCode: 0, output: "Implemented #12" })).toBe("done");
+    expect(classify({ exitCode: 0, finalText: "Implemented #12" })).toBe("done");
   });
 
-  it("is 'idle' when pi exits 0 and ends with the marker", () => {
-    expect(classify({ exitCode: 0, output: `Nothing open.\n${NO_TASK_MARKER}\n` })).toBe("idle");
+  it("is 'idle' when pi exits 0 and its final message ends with the marker", () => {
+    expect(classify({ exitCode: 0, finalText: `Nothing open.\n${NO_TASK_MARKER}\n` })).toBe("idle");
+  });
+
+  it("is 'done' when the marker only shows up earlier in the log, not in the final message", () => {
+    expect(classify({ exitCode: 0, finalText: "Picked up issue #3 and fixed it." })).toBe("done");
   });
 
   it("is 'failed' when pi exits non-zero", () => {
-    expect(classify({ exitCode: 1, output: NO_TASK_MARKER })).toBe("failed");
+    expect(classify({ exitCode: 1, finalText: NO_TASK_MARKER })).toBe("failed");
   });
 
   it("is 'failed' when pi was killed (no exit code)", () => {
-    expect(classify({ exitCode: null, output: "" })).toBe("failed");
+    expect(classify({ exitCode: null, finalText: "" })).toBe("failed");
   });
 });
+
+const idle: PiResult = { exitCode: 0, output: NO_TASK_MARKER, finalText: NO_TASK_MARKER };
+const did = (text: string): PiResult => ({ exitCode: 0, output: text, finalText: text });
 
 describe("Supervisor", () => {
   const IDLE_MS = 1000;
@@ -45,8 +53,10 @@ describe("Supervisor", () => {
   let piResults: Array<PiResult | Error>;
   let sleeps: Array<{ ms: number; signal: AbortSignal; done: () => void }>;
   let supervisor: Supervisor;
+  let live: LiveRuns;
 
   beforeEach(() => {
+    live = new LiveRuns();
     store = new Store(":memory:");
     factoryId = store.createFactory({ name: "a", prompt: "Do work", directory: "/work" });
     piCalls = [];
@@ -55,11 +65,12 @@ describe("Supervisor", () => {
 
     supervisor = new Supervisor({
       store,
+      live,
       piBin: "pi",
       idleDelayMs: IDLE_MS,
       runPi: async (request) => {
         piCalls.push(request);
-        const next = piResults.shift() ?? { exitCode: 0, output: NO_TASK_MARKER };
+        const next = piResults.shift() ?? idle;
         if (next instanceof Error) throw next;
         return next;
       },
@@ -77,11 +88,11 @@ describe("Supervisor", () => {
     supervisor.start(factoryId);
 
     await vi.waitFor(() => expect(piCalls).toHaveLength(1));
-    expect(piCalls[0]).toEqual({ bin: "pi", prompt: buildPrompt("Do work"), directory: "/work" });
+    expect(piCalls[0]).toMatchObject({ bin: "pi", prompt: buildPrompt("Do work"), directory: "/work" });
   });
 
   it("records each run in the store", async () => {
-    piResults.push({ exitCode: 0, output: "did a task" });
+    piResults.push(did("did a task"));
     supervisor.start(factoryId);
 
     await vi.waitFor(() => expect(sleeps).toHaveLength(1));
@@ -91,7 +102,7 @@ describe("Supervisor", () => {
   });
 
   it("runs again straight away after a task was done", async () => {
-    piResults.push({ exitCode: 0, output: "task 1" }, { exitCode: 0, output: "task 2" });
+    piResults.push(did("task 1"), did("task 2"));
     supervisor.start(factoryId);
 
     await vi.waitFor(() => expect(sleeps).toHaveLength(1));
@@ -110,7 +121,7 @@ describe("Supervisor", () => {
   });
 
   it("sleeps after a failed run", async () => {
-    piResults.push({ exitCode: 1, output: "crash" });
+    piResults.push({ exitCode: 1, output: "crash", finalText: "" });
     supervisor.start(factoryId);
 
     await vi.waitFor(() => expect(sleeps).toHaveLength(1));
@@ -127,6 +138,46 @@ describe("Supervisor", () => {
       exitCode: null,
       output: "spawn pi ENOENT",
     });
+  });
+
+  it("streams pi's output to live watchers while the run is going", async () => {
+    const pi = deferred<PiResult>();
+    let onOutput: (text: string) => void = () => {};
+    let calls = 0;
+    supervisor = new Supervisor({
+      store,
+      live,
+      piBin: "pi",
+      idleDelayMs: IDLE_MS,
+      // The first run waits for the test; later runs never finish, so the loop doesn't spin.
+      runPi: (request) => {
+        if (calls++ > 0) return new Promise(() => {});
+        onOutput = request.onOutput!;
+        return pi.promise;
+      },
+      sleep: () => new Promise(() => {}),
+    });
+    supervisor.start(factoryId);
+    const runId = store.listRuns(factoryId)[0].id;
+    const seen: string[] = [];
+    let ended = false;
+    live.watch(runId, (text) => seen.push(text), () => (ended = true));
+
+    onOutput("working on it");
+    expect(seen).toEqual(["working on it"]);
+
+    pi.resolve(did("done"));
+    await vi.waitFor(() => expect(ended).toBe(true));
+    expect(store.getRun(runId)?.status).toBe("done");
+  });
+
+  it("ends the live run when pi cannot be started", async () => {
+    piResults.push(new Error("nope"));
+    supervisor.start(factoryId);
+
+    await vi.waitFor(() => expect(sleeps).toHaveLength(1));
+    const runId = store.listRuns(factoryId)[0].id;
+    expect(live.watch(runId, () => {}, () => {})).toBeUndefined();
   });
 
   it("uses the latest prompt on each run", async () => {
@@ -163,6 +214,7 @@ describe("Supervisor", () => {
       const pi = deferred<PiResult>();
       supervisor = new Supervisor({
         store,
+        live,
         piBin: "pi",
         idleDelayMs: IDLE_MS,
         runPi: () => pi.promise,
@@ -202,6 +254,7 @@ describe("Supervisor", () => {
       const pi = deferred<PiResult>();
       supervisor = new Supervisor({
         store,
+        live,
         piBin: "pi",
         idleDelayMs: IDLE_MS,
         runPi: () => pi.promise,
@@ -212,7 +265,7 @@ describe("Supervisor", () => {
       supervisor.stop(factoryId);
       expect(supervisor.status(factoryId)).toEqual({ state: "stopping" });
 
-      pi.resolve({ exitCode: 0, output: "finished task" });
+      pi.resolve(did("finished task"));
       await vi.waitFor(() => expect(supervisor.status(factoryId)).toEqual({ state: "stopped" }));
       expect(store.listRuns(factoryId)[0]).toMatchObject({ status: "done", output: "finished task" });
     });

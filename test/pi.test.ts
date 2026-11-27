@@ -11,13 +11,15 @@ describe("runPi", () => {
   beforeAll(() => {
     const dir = mkdtempSync(join(tmpdir(), "fake-pi-"));
     fakePi = join(dir, "pi");
-    // Prints its args and working dir, writes to stderr, exits with $FAKE_EXIT.
+    // Prints its args and working dir as plain lines, then a final assistant message as a JSON event.
     writeFileSync(
       fakePi,
       `#!/bin/sh
 echo "args: $*"
 echo "cwd: $(pwd)"
 echo "oops" >&2
+echo '{"type":"message_update","assistantMessageEvent":{"type":"text_delta","delta":"All done."}}'
+echo '{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"All done."}]}}'
 exit \${FAKE_EXIT:-0}
 `,
     );
@@ -25,12 +27,33 @@ exit \${FAKE_EXIT:-0}
     workDir = realpathSync(mkdtempSync(join(tmpdir(), "work-")));
   });
 
-  it("runs pi in print mode with the prompt, inside the directory", async () => {
+  it("runs pi in JSON print mode with the prompt, inside the directory", async () => {
     const result = await runPi({ bin: fakePi, prompt: "do the thing", directory: workDir });
 
     expect(result.exitCode).toBe(0);
-    expect(result.output).toContain("args: -p do the thing");
+    expect(result.output).toContain("args: --mode json -p do the thing");
     expect(result.output).toContain(`cwd: ${workDir}`);
+  });
+
+  it("turns JSON events into a readable log", async () => {
+    const result = await runPi({ bin: fakePi, prompt: "x", directory: workDir });
+
+    expect(result.output).toContain("All done.");
+    expect(result.output).not.toContain('"type"');
+  });
+
+  it("returns the final assistant message", async () => {
+    const result = await runPi({ bin: fakePi, prompt: "x", directory: workDir });
+
+    expect(result.finalText).toBe("All done.");
+  });
+
+  it("reports output while it runs", async () => {
+    const pieces: string[] = [];
+
+    const result = await runPi({ bin: fakePi, prompt: "x", directory: workDir, onOutput: (t) => pieces.push(t) });
+
+    expect(pieces.join("")).toBe(result.output);
   });
 
   it("captures stderr in the output", async () => {

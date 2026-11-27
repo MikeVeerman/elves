@@ -1,12 +1,14 @@
 import { Hono } from "hono";
-import { html } from "hono/html";
+import { html, raw } from "hono/html";
+import { streamSSE } from "hono/streaming";
 import type { HtmlEscapedString } from "hono/utils/html";
 import type { Store, FactoryInput, Run } from "./store.ts";
 import type { Supervisor, Status } from "./supervisor.ts";
+import type { LiveRuns } from "./live.ts";
 
 type Html = HtmlEscapedString | Promise<HtmlEscapedString>;
 
-export function createApp({ store, supervisor }: { store: Store; supervisor: Supervisor }) {
+export function createApp({ store, supervisor, live }: { store: Store; supervisor: Supervisor; live: LiveRuns }) {
   const app = new Hono();
 
   app.get("/", (c) =>
@@ -111,11 +113,31 @@ export function createApp({ store, supervisor }: { store: Store; supervisor: Sup
             Status: <strong>${run.status}</strong> &middot; exit code: ${run.exitCode ?? "–"} &middot;
             started ${run.startedAt} &middot; finished ${run.finishedAt ?? "–"}
           </p>
-          <pre>${run.output}</pre>
+          <pre id="output">${run.output}</pre>
+          ${run.status === "running" ? followLive(run.id) : ""}
         `,
       ),
     );
   });
+
+  // Server-Sent Events: the output so far, then each new piece, then an "end" event.
+  app.get("/runs/:id/stream", (c) =>
+    streamSSE(c, async (stream) => {
+      await new Promise<void>((resolve) => {
+        const unwatch = live.watch(
+          Number(c.req.param("id")),
+          (text) => void stream.writeSSE({ data: JSON.stringify(text) }),
+          resolve,
+        );
+        if (!unwatch) return resolve();
+        stream.onAbort(() => {
+          unwatch();
+          resolve();
+        });
+      });
+      await stream.writeSSE({ event: "end", data: "" });
+    }),
+  );
 
   return app;
 }
@@ -158,6 +180,24 @@ function runsTable(runs: Run[]): Html {
       )}
     </table>
   `;
+}
+
+/** Appends live output to the page; reloads it when the run ends, to show the final status. */
+function followLive(runId: number): Html {
+  return html`<p><em>Live — this run is still going.</em></p>
+    <script>
+      const output = document.getElementById("output");
+      const events = new EventSource("/runs/${raw(String(runId))}/stream");
+      events.onmessage = (e) => {
+        const atBottom = window.innerHeight + window.scrollY >= document.body.scrollHeight - 20;
+        output.textContent += JSON.parse(e.data);
+        if (atBottom) window.scrollTo(0, document.body.scrollHeight);
+      };
+      events.addEventListener("end", () => {
+        events.close();
+        location.reload();
+      });
+    </script>`;
 }
 
 function page(title: string, body: Html): Html {

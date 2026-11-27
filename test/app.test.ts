@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { Store } from "../src/store.ts";
 import { Supervisor } from "../src/supervisor.ts";
 import { createApp } from "../src/app.ts";
+import { LiveRuns } from "../src/live.ts";
 
 function form(fields: Record<string, string>) {
   return { method: "POST", body: new URLSearchParams(fields) };
@@ -11,18 +12,21 @@ describe("web app", () => {
   let store: Store;
   let supervisor: Supervisor;
   let app: ReturnType<typeof createApp>;
+  let live: LiveRuns;
 
   beforeEach(() => {
     store = new Store(":memory:");
+    live = new LiveRuns();
     // pi never finishes, so a started factory stays "working".
     supervisor = new Supervisor({
       store,
+      live,
       piBin: "pi",
       idleDelayMs: 1000,
       runPi: () => new Promise(() => {}),
       sleep: () => new Promise(() => {}),
     });
-    app = createApp({ store, supervisor });
+    app = createApp({ store, supervisor, live });
   });
 
   describe("factory list", () => {
@@ -136,6 +140,49 @@ describe("web app", () => {
 
     it("returns 404 for an unknown run", async () => {
       expect((await app.request("/runs/999")).status).toBe(404);
+    });
+
+    it("follows a running run live", async () => {
+      const factoryId = store.createFactory({ name: "a", prompt: "p", directory: "/w" });
+      const runId = store.startRun(factoryId);
+
+      const html = await (await app.request(`/runs/${runId}`)).text();
+
+      expect(html).toContain(`new EventSource("/runs/${runId}/stream")`);
+    });
+
+    it("does not follow a finished run", async () => {
+      const factoryId = store.createFactory({ name: "a", prompt: "p", directory: "/w" });
+      const runId = store.startRun(factoryId);
+      store.finishRun(runId, { status: "done", exitCode: 0, output: "x" });
+
+      const html = await (await app.request(`/runs/${runId}`)).text();
+
+      expect(html).not.toContain("EventSource");
+    });
+  });
+
+  describe("live stream", () => {
+    it("sends the output so far, new output, then an end event", async () => {
+      live.start(7);
+      live.append(7, "line one\n");
+
+      const res = await app.request("/runs/7/stream");
+      expect(res.headers.get("content-type")).toContain("text/event-stream");
+
+      live.append(7, "line <two>");
+      live.finish(7);
+      const body = await res.text();
+
+      expect(body).toContain(`data: ${JSON.stringify("line one\n")}`);
+      expect(body).toContain(`data: ${JSON.stringify("line <two>")}`);
+      expect(body).toContain("event: end");
+    });
+
+    it("ends right away for a run that is not live", async () => {
+      const body = await (await app.request("/runs/123/stream")).text();
+
+      expect(body).toContain("event: end");
     });
   });
 });
