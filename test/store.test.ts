@@ -1,5 +1,10 @@
 import { describe, it, expect, beforeEach } from "vitest";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { Store } from "../src/store.ts";
+import { factoryInput } from "./helpers.ts";
 
 describe("Store", () => {
   let store: Store;
@@ -10,15 +15,19 @@ describe("Store", () => {
 
   describe("factories", () => {
     it("creates a factory and reads it back", () => {
-      const id = store.createFactory({ name: "docs", prompt: "Write docs", directory: "/tmp/docs" });
-
-      expect(store.getFactory(id)).toEqual({
-        id,
+      const input = factoryInput({
         name: "docs",
         prompt: "Write docs",
         directory: "/tmp/docs",
-        enabled: false,
+        agent: "claude",
+        model: "claude-sonnet-5-5",
+        idleMinutes: 10,
+        maxRunMinutes: 45,
       });
+
+      const id = store.createFactory(input);
+
+      expect(store.getFactory(id)).toEqual({ id, ...input, enabled: false });
     });
 
     it("returns undefined for an unknown factory", () => {
@@ -26,22 +35,23 @@ describe("Store", () => {
     });
 
     it("lists factories in creation order", () => {
-      store.createFactory({ name: "a", prompt: "p", directory: "/a" });
-      store.createFactory({ name: "b", prompt: "p", directory: "/b" });
+      store.createFactory(factoryInput({ name: "a", prompt: "p", directory: "/a" }));
+      store.createFactory(factoryInput({ name: "b", prompt: "p", directory: "/b" }));
 
       expect(store.listFactories().map((f) => f.name)).toEqual(["a", "b"]);
     });
 
-    it("updates name, prompt and directory", () => {
-      const id = store.createFactory({ name: "a", prompt: "p", directory: "/a" });
+    it("updates the settings", () => {
+      const id = store.createFactory(factoryInput());
+      const changed = factoryInput({ name: "b", agent: "codex", model: "gpt-6.2-sol", idleMinutes: 5, maxRunMinutes: 90 });
 
-      store.updateFactory(id, { name: "b", prompt: "q", directory: "/b" });
+      store.updateFactory(id, changed);
 
-      expect(store.getFactory(id)).toMatchObject({ name: "b", prompt: "q", directory: "/b" });
+      expect(store.getFactory(id)).toMatchObject(changed);
     });
 
     it("remembers whether a factory is enabled", () => {
-      const id = store.createFactory({ name: "a", prompt: "p", directory: "/a" });
+      const id = store.createFactory(factoryInput({ name: "a", prompt: "p", directory: "/a" }));
 
       store.setEnabled(id, true);
       expect(store.getFactory(id)?.enabled).toBe(true);
@@ -51,7 +61,7 @@ describe("Store", () => {
     });
 
     it("deletes a factory and its runs", () => {
-      const id = store.createFactory({ name: "a", prompt: "p", directory: "/a" });
+      const id = store.createFactory(factoryInput({ name: "a", prompt: "p", directory: "/a" }));
       const runId = store.startRun(id);
 
       store.deleteFactory(id);
@@ -65,7 +75,7 @@ describe("Store", () => {
     let factoryId: number;
 
     beforeEach(() => {
-      factoryId = store.createFactory({ name: "a", prompt: "p", directory: "/a" });
+      factoryId = store.createFactory(factoryInput({ name: "a", prompt: "p", directory: "/a" }));
     });
 
     it("starts a run with status 'running'", () => {
@@ -102,5 +112,18 @@ describe("Store", () => {
       expect(store.getRun(runId)).toMatchObject({ status: "interrupted" });
       expect(store.getRun(runId)?.finishedAt).toBeTypeOf("string");
     });
+  });
+
+  it("adds the new settings to a database made before they existed", () => {
+    const path = join(mkdtempSync(join(tmpdir(), "store-")), "old.db");
+    const old = new DatabaseSync(path);
+    old.exec(`CREATE TABLE factories (id INTEGER PRIMARY KEY, name TEXT NOT NULL, prompt TEXT NOT NULL,
+      directory TEXT NOT NULL, enabled INTEGER NOT NULL DEFAULT 0)`);
+    old.exec("INSERT INTO factories (name, prompt, directory) VALUES ('old', 'p', '/d')");
+    old.close();
+
+    const [factory] = new Store(path).listFactories();
+
+    expect(factory).toMatchObject({ name: "old", agent: "pi", model: "", idleMinutes: 30, maxRunMinutes: 60 });
   });
 });

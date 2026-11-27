@@ -2,7 +2,9 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import { Store } from "../src/store.ts";
 import { LiveRuns } from "../src/live.ts";
 import { Supervisor, buildPrompt, classify, NO_TASK_MARKER } from "../src/supervisor.ts";
-import type { PiRequest, PiResult } from "../src/pi.ts";
+import type { AgentRequest } from "../src/agents.ts";
+import type { RunResult as PiResult } from "../src/runner.ts";
+import { factoryInput } from "./helpers.ts";
 
 /** A promise we can resolve from the test. */
 function deferred<T = void>() {
@@ -46,10 +48,10 @@ const idle: PiResult = { exitCode: 0, output: NO_TASK_MARKER, finalText: NO_TASK
 const did = (text: string): PiResult => ({ exitCode: 0, output: text, finalText: text });
 
 describe("Supervisor", () => {
-  const IDLE_MS = 1000;
+  const IDLE_MS = 2 * 60_000;
   let store: Store;
   let factoryId: number;
-  let piCalls: PiRequest[];
+  let piCalls: AgentRequest[];
   let piResults: Array<PiResult | Error>;
   let sleeps: Array<{ ms: number; signal: AbortSignal; done: () => void }>;
   let supervisor: Supervisor;
@@ -58,7 +60,9 @@ describe("Supervisor", () => {
   beforeEach(() => {
     live = new LiveRuns();
     store = new Store(":memory:");
-    factoryId = store.createFactory({ name: "a", prompt: "Do work", directory: "/work" });
+    factoryId = store.createFactory(
+      factoryInput({ prompt: "Do work", directory: "/work", agent: "claude", model: "claude-opus-5-5", idleMinutes: 2, maxRunMinutes: 15 }),
+    );
     piCalls = [];
     piResults = [];
     sleeps = [];
@@ -66,9 +70,7 @@ describe("Supervisor", () => {
     supervisor = new Supervisor({
       store,
       live,
-      piBin: "pi",
-      idleDelayMs: IDLE_MS,
-      runPi: async (request) => {
+      runAgent: async (request) => {
         piCalls.push(request);
         const next = piResults.shift() ?? idle;
         if (next instanceof Error) throw next;
@@ -84,11 +86,17 @@ describe("Supervisor", () => {
     });
   });
 
-  it("runs pi with the factory's prompt in its directory", async () => {
+  it("runs the factory's agent and model with its prompt, directory and max run time", async () => {
     supervisor.start(factoryId);
 
     await vi.waitFor(() => expect(piCalls).toHaveLength(1));
-    expect(piCalls[0]).toMatchObject({ bin: "pi", prompt: buildPrompt("Do work"), directory: "/work" });
+    expect(piCalls[0]).toMatchObject({
+      agent: "claude",
+      model: "claude-opus-5-5",
+      prompt: buildPrompt("Do work"),
+      directory: "/work",
+      timeoutMs: 15 * 60_000,
+    });
   });
 
   it("records each run in the store", async () => {
@@ -147,10 +155,8 @@ describe("Supervisor", () => {
     supervisor = new Supervisor({
       store,
       live,
-      piBin: "pi",
-      idleDelayMs: IDLE_MS,
       // The first run waits for the test; later runs never finish, so the loop doesn't spin.
-      runPi: (request) => {
+      runAgent: (request) => {
         if (calls++ > 0) return new Promise(() => {});
         onOutput = request.onOutput!;
         return pi.promise;
@@ -184,7 +190,7 @@ describe("Supervisor", () => {
     supervisor.start(factoryId);
     await vi.waitFor(() => expect(sleeps).toHaveLength(1));
 
-    store.updateFactory(factoryId, { name: "a", prompt: "New prompt", directory: "/work" });
+    store.updateFactory(factoryId, { ...store.getFactory(factoryId)!, prompt: "New prompt" });
     sleeps[0].done();
 
     await vi.waitFor(() => expect(piCalls).toHaveLength(2));
@@ -215,9 +221,7 @@ describe("Supervisor", () => {
       supervisor = new Supervisor({
         store,
         live,
-        piBin: "pi",
-        idleDelayMs: IDLE_MS,
-        runPi: () => pi.promise,
+        runAgent: () => pi.promise,
         sleep: () => new Promise(() => {}),
       });
 
@@ -255,9 +259,7 @@ describe("Supervisor", () => {
       supervisor = new Supervisor({
         store,
         live,
-        piBin: "pi",
-        idleDelayMs: IDLE_MS,
-        runPi: () => pi.promise,
+        runAgent: () => pi.promise,
         sleep: () => new Promise(() => {}),
       });
       supervisor.start(factoryId);
@@ -286,7 +288,7 @@ describe("Supervisor", () => {
     it("starts every enabled factory and marks leftover runs interrupted", async () => {
       const leftover = store.startRun(factoryId);
       store.setEnabled(factoryId, true);
-      const disabledId = store.createFactory({ name: "b", prompt: "p", directory: "/b" });
+      const disabledId = store.createFactory(factoryInput({ name: "b", prompt: "p", directory: "/b" }));
 
       supervisor.resume();
 
