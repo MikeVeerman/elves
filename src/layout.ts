@@ -109,6 +109,16 @@ const STYLE = `
   @keyframes float { 0% { opacity: 0; transform: translateY(2px); } 30% { opacity: 1; }
     100% { opacity: 0; transform: translateY(-3px); } }
   .elf-off { filter: grayscale(1); opacity: .55; }
+  .elf-alert .exclaim { animation: blink 1s steps(1) infinite; }
+  @keyframes blink { 50% { visibility: hidden; } }
+
+  dialog { max-width: 34rem; width: calc(100% - 2rem); padding: 1.5rem; background: var(--card); color: var(--ink);
+    border: 3px solid var(--ink); box-shadow: 6px 6px 0 var(--ink); }
+  dialog::backdrop { background: rgba(15, 31, 23, .75); }
+  dialog h2 { margin-top: .5rem; color: var(--red); text-align: center; }
+  dialog p { margin: .8rem 0; }
+  dialog form { text-align: center; margin-top: 1.25rem; }
+  .warning-elf { display: flex; justify-content: center; }
   @media (prefers-reduced-motion: reduce) {
     .elf * { animation: none !important; }
     .elf-working .frame-down { visibility: hidden; }

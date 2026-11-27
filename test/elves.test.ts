@@ -38,6 +38,14 @@ describe("elf", () => {
     expect(out).toContain(">z</text>");
   });
 
+  it("raises the alarm, with an exclamation mark", async () => {
+    const out = await svg("alert");
+
+    expect(out).toContain('class="elf elf-alert"');
+    expect(out).toContain('aria-label="Elf with a warning"');
+    expect(out).toContain('class="exclaim"');
+  });
+
   it("is greyed out when off", async () => {
     expect(await svg("off")).toContain('class="elf elf-off"');
   });

@@ -33,6 +33,11 @@ export function createApp({ store, supervisor, live, models, auth }: Deps) {
 
   app.use("*", requireLogin(auth));
 
+  app.post("/warning/acknowledge", (c) => {
+    store.acknowledgeWarning();
+    return c.redirect("/", 303);
+  });
+
   app.post("/logout", (c) => {
     endSession(c);
     return c.redirect("/login", 303);
@@ -67,6 +72,7 @@ export function createApp({ store, supervisor, live, models, auth }: Deps) {
                   </tr>`;
                 })}
               </table>`}
+          ${store.isWarningAcknowledged() ? "" : permissionsWarning()}
         `,
       ),
     );
@@ -223,6 +229,33 @@ export function createApp({ store, supervisor, live, models, auth }: Deps) {
 
 function sameFolder(a: string, b: string): boolean {
   return resolve(expandHome(a)) === resolve(expandHome(b));
+}
+
+/** Shown after login until someone acknowledges it: elves can do a lot of damage in the wrong hands. */
+function permissionsWarning(): Html {
+  return html`<dialog id="permissions-warning" aria-labelledby="warning-title">
+      <div class="warning-elf">${elf("alert", 96)}</div>
+      <h2 id="warning-title">Before you hire any elves</h2>
+      <p><strong>Agents run with every permission.</strong> Elves starts Claude Code, Codex, pi and
+        opencode without permission prompts. An elf can run any command, change or delete any file
+        this user account can reach, and push code.</p>
+      <p><strong>Keep network access limited.</strong> Only reach Elves on this machine or over a
+        private network like your tailnet. Never expose it to the internet.</p>
+      <p><strong>Keep the login safe.</strong> Whoever knows <code>ELVES_USERNAME</code> and
+        <code>ELVES_PASSWORD</code> can make agents do anything on this machine. Use a long, unique
+        password and don't share it.</p>
+      <form method="post" action="/warning/acknowledge">
+        <button>I understand</button>
+      </form>
+    </dialog>
+    <script>
+      (() => {
+        const dialog = document.getElementById("permissions-warning");
+        dialog.showModal();
+        // Only "I understand" closes it; Escape doesn't.
+        dialog.addEventListener("cancel", (e) => e.preventDefault());
+      })();
+    </script>`;
 }
 
 /**

@@ -141,4 +141,23 @@ describe("Store", () => {
 
     expect(factory).toMatchObject({ name: "old", agent: "pi", model: "", idleMinutes: 30, maxRunMinutes: 60 });
   });
+
+  describe("permissions warning", () => {
+    it("is not acknowledged at first", () => {
+      expect(store.isWarningAcknowledged()).toBe(false);
+    });
+
+    it("remembers that it was acknowledged", () => {
+      store.acknowledgeWarning();
+
+      expect(store.isWarningAcknowledged()).toBe(true);
+    });
+
+    it("can be acknowledged twice", () => {
+      store.acknowledgeWarning();
+      store.acknowledgeWarning();
+
+      expect(store.isWarningAcknowledged()).toBe(true);
+    });
+  });
 });
