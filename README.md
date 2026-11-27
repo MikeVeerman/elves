@@ -1,69 +1,115 @@
 # Elves
 
-Your backlog gets done while you sleep. Each elf is a loop around a coding agent (pi, Claude Code, Codex or opencode):
+**Your backlog gets done while you sleep.**
+
+Elves runs coding agents in a loop. Each elf takes the next task from a backlog, does it, and
+goes back for more. When the backlog is empty, it naps and checks again later.
+
+![The Elves web interface](docs/screenshot.png)
+
+## How an elf works
+
+An elf is a loop around a coding agent: [pi](https://github.com/badlogic/pi-mono),
+[Claude Code](https://docs.claude.com/en/docs/claude-code), [Codex](https://github.com/openai/codex)
+or [opencode](https://opencode.ai).
 
 ```
 forever:
-  run the agent once, with the factory's prompt, in the factory's directory
+  run the agent once, with the elf's prompt, in the elf's directory
   save the run (status, exit code, output)
-  if the agent did a task: run again straight away
-  otherwise (nothing to do, or failed): wait, then check again
+  if the agent did a task:  run again straight away
+  otherwise:                nap, then check again
 ```
 
-An elf (called a "factory" in the code) has:
+Elves doesn't keep a backlog itself. The **prompt** tells the agent where the backlog lives and how
+to pick the next item. That can be GitHub issues, a Notion board, a Markdown file, or anything else
+the agent can reach. For example:
+
+> Take the oldest open GitHub issue labeled `elves`, implement it, open a PR and comment on the issue.
+
+To know when to nap, Elves adds one line to every prompt: if there is no task, the agent must end its
+reply with `NO_TASK_AVAILABLE`.
+
+## Features
+
+- **Any of four agents**: pi, Claude Code, Codex or opencode, picked per elf.
+- **Model dropdown** filled from each agent's own model list (`pi --list-models`, `opencode models`,
+  `~/.codex/models_cache.json`; Claude has a fixed list).
+- **Live output**: watch a running agent's tool calls and messages as they happen.
+- **Run history**: every run is saved with its status, exit code and full output.
+- **Max run time**: a run that takes too long is stopped, along with every command it started.
+- **Survives restarts**: elves that were working start again when the server comes back up.
+- **Pixel-art elves** that hammer while working, snooze while napping, and go grey when stopped.
+
+## Settings per elf
 
 | Setting | Meaning |
 |---|---|
 | Name | Shown in the list |
 | Agent | `pi`, `claude`, `codex` or `opencode` |
-| Model | Picked from the agent's own model list, or "agent default" |
+| Model | One of the agent's models, or "agent default" |
 | Working directory | Where the agent runs. `~` works |
-| Wait when there's nothing to do | Minutes to wait before checking again (default 30). Also used after a failed run |
-| Max run time | Minutes one run may take before it's killed and marked failed (default 60) |
-| Prompt | Tells the agent where the backlog is and how to pick the next item |
+| Wait when there's nothing to do | Minutes to nap before checking again (default 30). Also used after a failed run |
+| Max run time | Minutes one run may take before it's stopped and marked failed (default 60) |
+| Prompt | Where the backlog is and how to pick the next item |
 
-Example prompt:
+## Getting started
 
-> Take the oldest open GitHub issue labeled `factory`, implement it, open a PR and comment on the issue.
-
-Every prompt gets one fixed line added: if there is no task, the agent must end its reply with
-`NO_TASK_AVAILABLE`. That marker is how the loop knows to wait.
-
-**Agents run with full access, without permission prompts** (`--dangerously-skip-permissions` for
-claude, `--dangerously-bypass-approvals-and-sandbox` for codex; pi and opencode allow everything by
-default). Nobody is there to answer a prompt, so a factory would stall otherwise. Only point a
-factory at directories and backlogs you trust.
-
-While a run is going, its page shows the agent's output live.
-
-Model lists come from `pi --list-models`, `opencode models` and `~/.codex/models_cache.json`;
-claude has a fixed list. They are read once when the server starts.
-
-## Run
+You need **Node 24 or newer**, plus at least one of the agents installed and logged in.
 
 ```sh
 npm install
 npm start          # http://localhost:3000
 ```
 
-Settings (environment variables):
+Open the page, click **+ New elf**, fill in the form, and press **Start**.
 
-| Variable  | Default      | Meaning                  |
-|-----------|--------------|--------------------------|
-| `HOST`    | `127.0.0.1`  | Address to listen on (there is no login, so keep it local) |
-| `PORT`    | `3000`       | Web interface port       |
-| `DB_PATH` | `factory.db` | SQLite file              |
+Environment variables:
 
-Factories that were running come back up after a server restart. A run that was cut off by the
-restart shows as `interrupted`. Stopping a factory lets the current run finish first.
-Stopping the server (Ctrl-C) also stops any agent that is still running.
+| Variable  | Default      | Meaning |
+|-----------|--------------|---------|
+| `HOST`    | `127.0.0.1`  | Address to listen on |
+| `PORT`    | `3000`       | Web interface port |
+| `DB_PATH` | `factory.db` | SQLite file with elves and runs |
 
-## Develop
+## ⚠️ Safety
+
+- **Agents run with full access and are never asked for permission.** Claude gets
+  `--dangerously-skip-permissions` and Codex gets `--dangerously-bypass-approvals-and-sandbox`. pi
+  and opencode allow everything by default. Nobody is around to approve anything, so an elf would
+  get stuck otherwise. Only point elves at directories and backlogs you trust: whoever can write
+  to the backlog can tell the agent what to do.
+- **There is no login.** The server only listens on `127.0.0.1` by default. Don't expose it to a
+  network without putting authentication in front of it.
+
+## Good to know
+
+- **Stopping an elf** lets its current run finish first. Stopping a napping elf takes effect at once.
+- **Stopping the server** (Ctrl-C) also stops any agent that is still running. A run that gets cut
+  off shows as `interrupted`.
+- **Model lists** are read once at startup. Restart the server to pick up new models.
+
+## Development
 
 ```sh
 npm test           # unit tests
-npm run coverage   # tests + coverage report (coverage/index.html)
+npm run coverage   # tests + coverage report in coverage/index.html
 npm run typecheck
 ```
 
-Needs Node 24+ (uses the built-in `node:sqlite` and runs TypeScript directly, no build step).
+There's no build step: Node runs the TypeScript directly and uses its built-in `node:sqlite`.
+
+| File | What it does |
+|---|---|
+| `src/server.ts` | Starts everything |
+| `src/supervisor.ts` | The loop: run, record, nap |
+| `src/agents.ts` | The command line for each agent |
+| `src/runner.ts` | Runs an agent process, with the max run time |
+| `src/parsers.ts` | Turns each agent's JSON output into a readable log |
+| `src/live.ts` | Passes live output to whoever is watching |
+| `src/models.ts` | Reads each agent's model list |
+| `src/store.ts` | SQLite storage for elves and runs |
+| `src/app.ts` | The web interface |
+| `src/elves.ts` | The pixel-art elves |
+
+In the code, an elf is called a *factory*.
