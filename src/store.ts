@@ -31,7 +31,7 @@ export type Run = {
 };
 
 export type RunResult = {
-  status: Exclude<RunStatus, "running" | "interrupted">;
+  status: Exclude<RunStatus, "running">;
   exitCode: number | null;
   output: string;
 };

@@ -11,6 +11,8 @@ export type CommandRequest = {
   timeoutMs: number;
   /** After the stop request at timeout, how long to wait before force-killing. */
   killGraceMs?: number;
+  /** Aborting it stops the command right away (force stop). */
+  signal?: AbortSignal;
   onOutput?: (text: string) => void;
 };
 export type RunResult = { exitCode: number | null; output: string; finalText: string };
@@ -47,6 +49,7 @@ export const runCommand = ({
   log,
   timeoutMs,
   killGraceMs = 5000,
+  signal,
   onOutput,
 }: CommandRequest): Promise<RunResult> =>
   new Promise((resolve, reject) => {
@@ -66,12 +69,15 @@ export const runCommand = ({
     const pid = child.pid;
     if (pid) running.add(pid);
     let forceKill: NodeJS.Timeout | undefined;
-    const timer = setTimeout(() => {
-      emit("\n[killed: the run took longer than the max run time]\n");
+    const stop = (reason: string) => {
+      emit(`\n[${reason}]\n`);
       killGroup(pid!);
       // An agent may ignore the stop request. Then it doesn't get a choice.
       forceKill = setTimeout(() => killGroup(pid!, "SIGKILL"), killGraceMs);
-    }, timeoutMs);
+    };
+    const timer = setTimeout(() => stop("killed: the run took longer than the max run time"), timeoutMs);
+    const onAbort = () => stop("force stopped");
+    signal?.addEventListener("abort", onAbort, { once: true });
 
     // Decode as UTF-8 per stream, so a character split across two chunks stays intact.
     child.stdout.setEncoding("utf8").on("data", (chunk: string) => emit(log.push(chunk)));
@@ -83,6 +89,7 @@ export const runCommand = ({
     child.on("close", (exitCode) => {
       clearTimeout(timer);
       clearTimeout(forceKill);
+      signal?.removeEventListener("abort", onAbort);
       if (pid) running.delete(pid);
       emit(log.end());
       resolve({ exitCode, output, finalText: log.finalText });

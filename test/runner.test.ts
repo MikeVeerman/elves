@@ -85,6 +85,24 @@ exit \${FAKE_EXIT:-0}
     }
   });
 
+  it("stops the command when asked to, through its abort signal", async () => {
+    process.env.FAKE_SLEEP = "5";
+    try {
+      const abort = new AbortController();
+      const running = run({ signal: abort.signal });
+      await new Promise((r) => setTimeout(r, 100));
+
+      abort.abort();
+      const result = await running;
+
+      expect(result.exitCode).toBeNull();
+      expect(result.output).toContain("[force stopped]");
+      expect(result.output).not.toContain("All done.");
+    } finally {
+      delete process.env.FAKE_SLEEP;
+    }
+  });
+
   it("force-kills a command that ignores the stop request", async () => {
     const dir = mkdtempSync(join(tmpdir(), "stubborn-"));
     const stubborn = join(dir, "agent");

@@ -289,6 +289,46 @@ describe("Supervisor", () => {
     });
   });
 
+  describe("forceStop", () => {
+    it("kills the current run right away and marks it interrupted", async () => {
+      let signal: AbortSignal | undefined;
+      supervisor = new Supervisor({
+        store,
+        live,
+        // Like the real runner: ends when its signal is aborted.
+        runAgent: (request) => {
+          signal = request.signal;
+          return new Promise((resolve) =>
+            request.signal!.addEventListener("abort", () =>
+              resolve({ exitCode: null, output: "[force stopped]", finalText: "" }),
+            ),
+          );
+        },
+        sleep: () => new Promise(() => {}),
+      });
+      supervisor.start(factoryId);
+      supervisor.stop(factoryId);
+      expect(supervisor.status(factoryId)).toEqual({ state: "stopping" });
+
+      supervisor.forceStop(factoryId);
+
+      expect(signal?.aborted).toBe(true);
+      await vi.waitFor(() => expect(supervisor.status(factoryId)).toEqual({ state: "stopped" }));
+      expect(store.listRuns(factoryId)[0]).toMatchObject({ status: "interrupted", output: "[force stopped]" });
+      expect(store.getFactory(factoryId)?.enabled).toBe(false);
+    });
+
+    it("stops a sleeping elf like a normal stop", async () => {
+      supervisor.start(factoryId);
+      await vi.waitFor(() => expect(sleeps).toHaveLength(1));
+
+      supervisor.forceStop(factoryId);
+
+      await vi.waitFor(() => expect(supervisor.status(factoryId)).toEqual({ state: "stopped" }));
+      expect(piCalls).toHaveLength(1);
+    });
+  });
+
   describe("resume", () => {
     it("starts every enabled factory and marks leftover runs interrupted", async () => {
       const leftover = store.startRun(factoryId);

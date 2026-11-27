@@ -32,7 +32,7 @@ type Options = {
   sleep: (ms: number, signal: AbortSignal) => Promise<void>;
 };
 
-type LoopState = { phase: "working" } | { phase: "sleeping"; until: Date; wake: AbortController };
+type LoopState = { phase: "working"; abort: AbortController } | { phase: "sleeping"; until: Date; wake: AbortController };
 
 /** Runs one loop per enabled factory: run its agent, record the run, sleep when there was nothing to do. */
 export class Supervisor {
@@ -62,6 +62,13 @@ export class Supervisor {
     if (state?.phase === "sleeping") state.wake.abort();
   }
 
+  /** Stop now: kills the agent of the current run instead of letting it finish. */
+  forceStop(factoryId: number): void {
+    this.stop(factoryId);
+    const state = this.loops.get(factoryId);
+    if (state?.phase === "working") state.abort.abort();
+  }
+
   status(factoryId: number): Status {
     const state = this.loops.get(factoryId);
     if (!state) return { state: "stopped" };
@@ -73,8 +80,9 @@ export class Supervisor {
     const { store, sleep } = this.options;
 
     while (this.isEnabled(factoryId)) {
-      this.loops.set(factoryId, { phase: "working" });
-      const status = await this.runOnce(factoryId);
+      const abort = new AbortController();
+      this.loops.set(factoryId, { phase: "working", abort });
+      const status = await this.runOnce(factoryId, abort.signal);
 
       if (status !== "done" && this.isEnabled(factoryId)) {
         const idleDelayMs = store.getFactory(factoryId)!.idleMinutes * 60_000;
@@ -87,7 +95,7 @@ export class Supervisor {
     this.loops.delete(factoryId);
   }
 
-  private async runOnce(factoryId: number): Promise<RunResult["status"]> {
+  private async runOnce(factoryId: number, signal: AbortSignal): Promise<RunResult["status"]> {
     const { store, live, runAgent } = this.options;
     const factory = store.getFactory(factoryId)!;
     const runId = store.startRun(factoryId);
@@ -101,9 +109,10 @@ export class Supervisor {
         prompt: buildPrompt(factory.prompt),
         directory: factory.directory,
         timeoutMs: factory.maxRunMinutes * 60_000,
+        signal,
         onOutput: (text) => live.append(runId, text),
       });
-      result = { status: classify(run), exitCode: run.exitCode, output: run.output };
+      result = { status: signal.aborted ? "interrupted" : classify(run), exitCode: run.exitCode, output: run.output };
     } catch (error) {
       result = { status: "failed", exitCode: null, output: (error as Error).message };
     }
