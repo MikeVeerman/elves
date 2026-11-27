@@ -76,6 +76,9 @@ Environment variables:
 
 The server won't start without a username and password. Restarting it logs you out.
 
+After the first login, an elf pops up with a warning about what agents can do (see Safety below).
+It keeps showing up until someone presses **I understand**.
+
 ### Reaching Elves from your tailnet
 
 Keep Elves on localhost and let [Tailscale Serve](https://tailscale.com/kb/1312/serve) share it

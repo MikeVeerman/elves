@@ -54,6 +54,10 @@ const SCHEMA = `
     finished_at TEXT
   );
   CREATE INDEX IF NOT EXISTS runs_by_factory ON runs (factory_id, id);
+  CREATE TABLE IF NOT EXISTS settings (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+  );
 `;
 
 // Settings added after the first version. Added to existing databases on startup.
@@ -146,6 +150,15 @@ export class Store {
 
   countRuns(factoryId: number): number {
     return this.db.prepare("SELECT COUNT(*) AS n FROM runs WHERE factory_id = ?").get(factoryId)!.n as number;
+  }
+
+  /** Whether someone pressed "I understand" on the permissions warning. */
+  isWarningAcknowledged(): boolean {
+    return this.db.prepare("SELECT 1 FROM settings WHERE key = 'warning_acknowledged'").get() !== undefined;
+  }
+
+  acknowledgeWarning(): void {
+    this.db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('warning_acknowledged', ?)").run(now());
   }
 
   markUnfinishedRunsInterrupted(): void {

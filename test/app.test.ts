@@ -501,4 +501,37 @@ describe("web app", () => {
       expect(res.headers.get("set-cookie")).toContain("elves_session=;");
     });
   });
+
+  describe("permissions warning", () => {
+    it("pops up after the first login, with an elf", async () => {
+      const html = await (await req("/")).text();
+
+      expect(html).toContain('<dialog id="permissions-warning"');
+      expect(html).toContain("elf-alert");
+      expect(html).toContain("every permission");
+      expect(html).toContain("network");
+      expect(html).toContain("ELVES_PASSWORD");
+      expect(html).toContain('action="/warning/acknowledge"');
+    });
+
+    it("stops popping up once acknowledged", async () => {
+      const res = await req("/warning/acknowledge", { method: "POST" });
+
+      expect(res.status).toBe(303);
+      expect(res.headers.get("location")).toBe("/");
+      expect(store.isWarningAcknowledged()).toBe(true);
+      expect(await (await req("/")).text()).not.toContain("permissions-warning");
+    });
+
+    it("can't be acknowledged without logging in", async () => {
+      const res = await app.request("/warning/acknowledge", { method: "POST" });
+
+      expect(res.status).toBe(401);
+      expect(store.isWarningAcknowledged()).toBe(false);
+    });
+
+    it("is not shown on the login page", async () => {
+      expect(await (await app.request("/login")).text()).not.toContain("permissions-warning");
+    });
+  });
 });

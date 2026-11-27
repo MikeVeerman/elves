@@ -1,7 +1,7 @@
 import { raw } from "hono/html";
 import type { Status } from "./supervisor.ts";
 
-export type Mood = "working" | "sleeping" | "off";
+export type Mood = "working" | "sleeping" | "off" | "alert";
 
 const PALETTE: Record<string, string> = {
   B: "#ffd34d", // bell
@@ -20,6 +20,7 @@ const PALETTE: Record<string, string> = {
   T: "#8b5a2b", // hammer handle
   I: "#9aa3ad", // hammer head
   A: "#4a4f57", // anvil
+  X: "#e53935", // exclamation mark
 };
 
 /** The elf, 18 x 16 pixels. "." is transparent. The right side leaves room for the hammer and anvil. */
@@ -54,7 +55,18 @@ const HAMMER_DOWN: [number, number, string][] = [
   [17, 11, "I"], [17, 12, "I"],
 ];
 
-const LABELS: Record<Mood, string> = { working: "Working elf", sleeping: "Sleeping elf", off: "Elf off duty" };
+// A big "!" next to the elf's head.
+const EXCLAMATION: [number, number, string][] = [
+  [15, 1, "X"], [16, 1, "X"], [15, 2, "X"], [16, 2, "X"], [15, 3, "X"], [16, 3, "X"],
+  [15, 4, "X"], [16, 4, "X"], [15, 5, "X"], [16, 5, "X"], [15, 7, "X"], [16, 7, "X"],
+];
+
+const LABELS: Record<Mood, string> = {
+  working: "Working elf",
+  sleeping: "Sleeping elf",
+  off: "Elf off duty",
+  alert: "Elf with a warning",
+};
 
 export function moodFor(status: Status): Mood {
   if (status.state === "sleeping") return "sleeping";
@@ -70,6 +82,9 @@ export function elf(mood: Mood, size = 48) {
   if (mood === "working") {
     parts.push(pixels(ANVIL, 13));
     parts.push(`<g class="frame-up">${points(HAMMER_UP)}</g>`, `<g class="frame-down">${points(HAMMER_DOWN)}</g>`);
+  }
+  if (mood === "alert") {
+    parts.push(`<g class="exclaim">${points(EXCLAMATION)}</g>`);
   }
   if (mood === "sleeping") {
     parts.push(`<text class="z" x="13" y="6">z</text>`, `<text class="z z2" x="15" y="3">z</text>`);
