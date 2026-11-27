@@ -1,6 +1,6 @@
-# Simple Software Factory
+# Elves
 
-Each factory is a loop around a coding agent (pi, Claude Code, Codex or opencode):
+Your backlog gets done while you sleep. Each elf is a loop around a coding agent (pi, Claude Code, Codex or opencode):
 
 ```
 forever:
@@ -10,7 +10,7 @@ forever:
   otherwise (nothing to do, or failed): wait, then check again
 ```
 
-A factory has:
+An elf (called a "factory" in the code) has:
 
 | Setting | Meaning |
 |---|---|

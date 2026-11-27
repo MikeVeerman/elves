@@ -46,6 +46,38 @@ describe("web app", () => {
     app = createApp({ store, supervisor, live, models });
   });
 
+  describe("look", () => {
+    it("is branded Elves, with pixel-art elves in the header", async () => {
+      const html = await (await app.request("/")).text();
+
+      expect(html).toContain("<title>Elves</title>");
+      expect(html).toContain('class="elf elf-working"');
+      expect(html).toContain('class="elf elf-sleeping"');
+    });
+
+    it("greets an empty workshop", async () => {
+      expect(await (await app.request("/")).text()).toContain("No elves yet");
+    });
+
+    it("shows an elf for each factory, matching its status", async () => {
+      const id = store.createFactory(factoryInput({ name: "busy" }));
+      supervisor.start(id);
+      store.createFactory(factoryInput({ name: "idle" }));
+
+      const html = await (await app.request("/")).text();
+      const rows = html.split("<tr").slice(2);
+
+      expect(rows[0]).toContain("elf-working");
+      expect(rows[1]).toContain("elf-off");
+    });
+
+    it("shows a big elf on the factory page", async () => {
+      const id = store.createFactory(factoryInput());
+
+      expect(await (await app.request(`/factories/${id}`)).text()).toContain('class="elf elf-off"');
+    });
+  });
+
   describe("factory list", () => {
     it("shows each factory with its agent, model and status", async () => {
       store.createFactory(factoryInput({ name: "docs-writer", agent: "codex", model: "gpt-6.2-sol" }));

@@ -7,6 +7,7 @@ import type { Supervisor, Status } from "./supervisor.ts";
 import type { LiveRuns } from "./live.ts";
 import type { ModelLists } from "./models.ts";
 import { AGENTS, type AgentName } from "./agents.ts";
+import { elf, moodFor } from "./elves.ts";
 
 type Html = HtmlEscapedString | Promise<HtmlEscapedString>;
 
@@ -28,39 +29,49 @@ const INVALID_FORM =
 export function createApp({ store, supervisor, live, models }: Deps) {
   const app = new Hono();
 
-  app.get("/", (c) =>
-    c.html(
+  app.get("/", (c) => {
+    const factories = store.listFactories();
+    return c.html(
       page(
-        "Factories",
+        undefined,
         html`
-          <h1>Factories</h1>
-          <p><a class="button" href="/factories/new">+ New factory</a></p>
-          <table>
-            <tr><th>Name</th><th>Agent</th><th>Model</th><th>Directory</th><th>Status</th></tr>
-            ${store.listFactories().map(
-              (f) => html`<tr>
-                <td><a href="/factories/${f.id}">${f.name}</a></td>
-                <td>${f.agent}</td>
-                <td>${f.model || "default"}</td>
-                <td><code>${f.directory}</code></td>
-                <td>${statusLabel(supervisor.status(f.id))}</td>
-              </tr>`,
-            )}
-          </table>
+          <div class="title-row">
+            <h1>Your elves</h1>
+            <a class="button" href="/factories/new">+ New elf</a>
+          </div>
+          ${factories.length === 0
+            ? html`<div class="empty">
+                ${elf("sleeping", 64)}
+                <p>No elves yet. Hire your first one to start on the backlog.</p>
+              </div>`
+            : html`<table>
+                <tr><th></th><th>Elf</th><th>Agent</th><th>Model</th><th>Directory</th><th>Status</th></tr>
+                ${factories.map((f) => {
+                  const status = supervisor.status(f.id);
+                  return html`<tr>
+                    <td class="avatar">${elf(moodFor(status), 32)}</td>
+                    <td><a href="/factories/${f.id}">${f.name}</a></td>
+                    <td>${f.agent}</td>
+                    <td>${f.model || "default"}</td>
+                    <td><code>${f.directory}</code></td>
+                    <td>${statusPill(status)}</td>
+                  </tr>`;
+                })}
+              </table>`}
         `,
       ),
-    ),
-  );
+    );
+  });
 
   // Registered before /factories/:id, so "new" isn't taken for an id.
   app.get("/factories/new", (c) =>
     c.html(
       page(
-        "New factory",
+        "New elf",
         html`
-          <p><a href="/">&larr; All factories</a></p>
-          <h1>New factory</h1>
-          ${factoryForm("/factories", NEW_FACTORY, "Create factory", models)}
+          <p><a href="/">&larr; All elves</a></p>
+          <h1>New elf</h1>
+          ${factoryForm("/factories", NEW_FACTORY, "Hire elf", models)}
         `,
       ),
     ),
@@ -83,21 +94,26 @@ export function createApp({ store, supervisor, live, models }: Deps) {
       page(
         factory.name,
         html`
-          <p><a href="/">&larr; All factories</a></p>
-          <h1>${factory.name}</h1>
-          <p>
-            Status: <strong>${statusLabel(status)}</strong>
-            <form method="post" action="/factories/${factory.id}/${running ? "stop" : "start"}" class="inline">
-              <button>${running ? "Stop" : "Start"}</button>
-            </form>
-          </p>
+          <p><a href="/">&larr; All elves</a></p>
+          <div class="hero">
+            ${elf(moodFor(status), 96)}
+            <div>
+              <h1>${factory.name}</h1>
+              <div class="status-line">
+                ${statusPill(status)}
+                <form method="post" action="/factories/${factory.id}/${running ? "stop" : "start"}">
+                  <button>${running ? "Stop" : "Start"}</button>
+                </form>
+              </div>
+            </div>
+          </div>
           <h2>Runs</h2>
           ${runsTable(store.listRuns(factory.id))}
           <h2>Settings</h2>
           ${factoryForm(`/factories/${factory.id}`, factory, "Save", models)}
           <h2>Danger zone</h2>
           <form method="post" action="/factories/${factory.id}/delete">
-            <button>Delete factory and its runs</button>
+            <button class="danger">Fire this elf (deletes its runs too)</button>
           </form>
         `,
       ),
@@ -139,7 +155,7 @@ export function createApp({ store, supervisor, live, models }: Deps) {
       page(
         `Run ${run.id}`,
         html`
-          <p><a href="/factories/${run.factoryId}">&larr; Back to factory</a></p>
+          <p><a href="/factories/${run.factoryId}">&larr; Back to elf</a></p>
           <h1>Run ${run.id}</h1>
           <p>
             Status: <strong>${run.status}</strong> &middot; exit code: ${run.exitCode ?? "–"} &middot;
@@ -198,9 +214,12 @@ async function readFactoryForm(request: Request): Promise<FactoryInput | undefin
   return valid ? input : undefined;
 }
 
-function statusLabel(status: Status): string {
-  if (status.state !== "sleeping") return status.state;
-  return `sleeping until ${status.until.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
+function statusPill(status: Status): Html {
+  const label =
+    status.state === "sleeping"
+      ? `sleeping until ${status.until.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`
+      : status.state;
+  return html`<span class="pill pill-${moodFor(status)}">${label}</span>`;
 }
 
 function factoryForm(action: string, factory: FactoryInput, button: string, models: ModelLists): Html {
@@ -296,27 +315,111 @@ function followLive(runId: number): Html {
     </script>`;
 }
 
-function page(title: string, body: Html): Html {
+function page(title: string | undefined, body: Html): Html {
   return html`<!doctype html>
-    <html>
+    <html lang="en">
       <head>
         <meta charset="utf-8">
         <meta name="viewport" content="width=device-width, initial-scale=1">
-        <title>${title} · Software Factory</title>
-        <style>
-          body { font-family: system-ui, sans-serif; max-width: 60rem; margin: 2rem auto; padding: 0 1rem; }
-          table { border-collapse: collapse; width: 100%; }
-          th, td { text-align: left; padding: .4rem .6rem; border-bottom: 1px solid #ddd; }
-          label { display: block; margin-bottom: .8rem; }
-          input, textarea, select { display: block; width: 100%; font: inherit; padding: .3rem; box-sizing: border-box; }
-          .row { display: flex; gap: 1rem; }
-          .row > label { flex: 1; }
-          pre { background: #f4f4f4; padding: 1rem; overflow-x: auto; white-space: pre-wrap; }
-          form.inline { display: inline; margin-left: .5rem; }
-          a.button { display: inline-block; padding: .4rem .8rem; border: 1px solid #888; border-radius: 4px;
-            text-decoration: none; color: inherit; }
-        </style>
+        <title>${title ? `${title} · Elves` : "Elves"}</title>
+        <link rel="preconnect" href="https://fonts.googleapis.com">
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
+        <style>${raw(STYLE)}</style>
       </head>
-      <body>${body}</body>
+      <body>
+        <header class="site-header">
+          <a href="/" class="brand">
+            <span class="crew">${elf("working", 52)}${elf("sleeping", 52)}${elf("working", 52)}</span>
+            <span>
+              <span class="logo">ELVES</span>
+              <span class="tagline">Your backlog gets done while you sleep.</span>
+            </span>
+          </a>
+        </header>
+        <main>${body}</main>
+      </body>
     </html>`;
 }
+
+const STYLE = `
+  :root {
+    --bg: #fbf6ec; --card: #fffdf8; --ink: #2b2118; --muted: #7a6a58; --line: #e6dccb;
+    --pine: #1f3b2d; --green: #2e8b57; --red: #c0392b; --gold: #e0b43c; --sky: #3f6e9e;
+    --pixel: "Press Start 2P", ui-monospace, monospace;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 16px/1.5 system-ui, sans-serif; }
+  main { max-width: 60rem; margin: 0 auto; padding: 1.5rem 1rem 4rem; }
+  a { color: var(--green); }
+  h1, h2 { font-family: var(--pixel); font-weight: normal; line-height: 1.4; }
+  h1 { font-size: 1.25rem; margin: 0 0 .5rem; }
+  h2 { font-size: .8rem; margin: 2.5rem 0 1rem; color: var(--pine); }
+
+  .site-header { background: var(--pine); border-bottom: 6px solid var(--gold); }
+  .brand { display: flex; align-items: center; gap: 1.25rem; max-width: 60rem; margin: 0 auto;
+    padding: 1rem; text-decoration: none; }
+  .crew { display: flex; gap: .25rem; align-items: flex-end; }
+  .logo { display: block; font-family: var(--pixel); font-size: 1.6rem; color: var(--gold);
+    text-shadow: 3px 3px 0 #0f1f17; }
+  .tagline { display: block; color: var(--bg); font-size: .9rem; margin-top: .4rem; opacity: .85; }
+  .site-header .z { fill: var(--gold); }
+
+  .title-row { display: flex; justify-content: space-between; align-items: center; gap: 1rem; margin: .5rem 0 1rem; }
+  .title-row h1 { margin: 0; }
+  .hero { display: flex; align-items: center; gap: 1.25rem; margin: .5rem 0 1rem; }
+  .status-line { display: flex; align-items: center; gap: .75rem; }
+  .empty { text-align: center; padding: 2.5rem 1rem; border: 2px dashed var(--line); background: var(--card); }
+
+  table { border-collapse: collapse; width: 100%; background: var(--card); border: 2px solid var(--ink);
+    box-shadow: 4px 4px 0 var(--ink); }
+  th { font-family: var(--pixel); font-size: .6rem; font-weight: normal; background: #f1e8d6; }
+  th, td { text-align: left; padding: .5rem .7rem; border-bottom: 1px solid var(--line); vertical-align: middle; }
+  td.avatar { width: 1%; padding: .25rem .5rem; }
+  code { font-size: .85em; }
+
+  .pill { display: inline-block; padding: .1rem .55rem; font-size: .8rem; color: white; border: 2px solid var(--ink); }
+  .pill-working { background: var(--green); }
+  .pill-sleeping { background: var(--sky); }
+  .pill-off { background: var(--muted); }
+
+  button, a.button { display: inline-block; font-family: var(--pixel); font-size: .65rem; padding: .7rem 1rem;
+    background: var(--red); color: white; border: 2px solid var(--ink); box-shadow: 3px 3px 0 var(--ink);
+    text-decoration: none; cursor: pointer; }
+  button:hover, a.button:hover { transform: translate(1px, 1px); box-shadow: 2px 2px 0 var(--ink); }
+  button:active, a.button:active { transform: translate(3px, 3px); box-shadow: none; }
+  button.danger { background: var(--ink); }
+
+  label { display: block; margin-bottom: 1rem; font-weight: 600; font-size: .9rem; }
+  input, textarea, select { display: block; width: 100%; margin-top: .3rem; font: 400 1rem system-ui, sans-serif;
+    padding: .45rem .55rem; background: white; border: 2px solid var(--ink); border-radius: 0; }
+  input:focus, textarea:focus, select:focus { outline: 3px solid var(--gold); outline-offset: 0; }
+  .row { display: flex; gap: 1rem; }
+  .row > label { flex: 1; }
+
+  pre { background: #1d1a16; color: #f3ead8; padding: 1rem; overflow-x: auto; white-space: pre-wrap;
+    border: 2px solid var(--ink); box-shadow: 4px 4px 0 var(--ink); }
+
+  .elf { display: block; }
+  .elf-working .frame-up { animation: hammer-up .6s steps(1) infinite; }
+  .elf-working .frame-down { animation: hammer-down .6s steps(1) infinite; }
+  @keyframes hammer-up { 0% { visibility: visible; } 50% { visibility: hidden; } }
+  @keyframes hammer-down { 0% { visibility: hidden; } 50% { visibility: visible; } }
+  .elf .z { font: 4px var(--pixel); fill: var(--pine); animation: float 2.4s ease-in-out infinite; }
+  .elf .z2 { animation-delay: 1.2s; }
+  @keyframes float { 0% { opacity: 0; transform: translateY(2px); } 30% { opacity: 1; }
+    100% { opacity: 0; transform: translateY(-3px); } }
+  .elf-off { filter: grayscale(1); opacity: .55; }
+  @media (prefers-reduced-motion: reduce) {
+    .elf * { animation: none !important; }
+    .elf-working .frame-down { visibility: hidden; }
+  }
+
+  @media (max-width: 40rem) {
+    .row { flex-direction: column; gap: 0; }
+    .crew .elf:nth-child(n + 2) { display: none; }
+    .logo { font-size: 1.2rem; }
+    table { font-size: .85rem; }
+    th:nth-child(5), td:nth-child(5) { display: none; }
+  }
+`;
