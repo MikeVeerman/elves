@@ -38,6 +38,8 @@ reply with `NO_TASK_AVAILABLE`.
 - **Live output**: watch a running agent's tool calls and messages as they happen.
 - **Run history**: every run is saved with its status, exit code and full output.
 - **Max run time**: a run that takes too long is stopped, along with every command it started.
+- **Stop or Force stop**: Stop lets the current run finish; Force stop ends it right away.
+- **Login** with a username and password, safe to share over a tailnet.
 - **Survives restarts**: elves that were working start again when the server comes back up.
 - **Pixel-art elves** that hammer while working, snooze while napping, and go grey when stopped.
 
@@ -135,12 +137,14 @@ There's no build step: Node runs the TypeScript directly and uses its built-in `
 | `src/auth.ts` | Login, session cookie, cross-site check |
 | `src/supervisor.ts` | The loop: run, record, nap |
 | `src/agents.ts` | The command line for each agent |
-| `src/runner.ts` | Runs an agent process, with the max run time |
+| `src/runner.ts` | Runs an agent process, with the max run time and force stop |
 | `src/parsers.ts` | Turns each agent's JSON output into a readable log |
 | `src/live.ts` | Passes live output to whoever is watching |
 | `src/models.ts` | Reads each agent's model list |
-| `src/store.ts` | SQLite storage for elves and runs |
-| `src/app.ts` | The web interface |
+| `src/store.ts` | SQLite storage for elves, runs and settings |
+| `src/app.ts` | The web routes |
+| `src/form.ts` | The elf settings form and its validation |
+| `src/layout.ts` | The page shell and CSS |
 | `src/elves.ts` | The pixel-art elves |
 
 In the code, an elf is called a *factory*.
